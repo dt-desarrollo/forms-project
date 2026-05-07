@@ -20,6 +20,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Empty, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
@@ -613,89 +619,94 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardP
                   </EmptyDescription>
                 </Empty>
               ) : (
-                <div className="space-y-6">
+                <Accordion type="single" collapsible className="w-full">
                   {progresoSedesFiltradas.map((progreso) => (
-                    <div key={progreso.sedeId} className="rounded-lg border p-4">
-                      <div className="mb-4 flex items-center justify-between">
-                        <div>
-                          <h3 className="font-semibold">{progreso.sede}</h3>
-                          <p className="text-sm text-muted-foreground">
-                            {progreso.realizadas} de {progreso.metaTotal} encuestas ({progreso.porcentaje}%)
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-4">
-                          <div className="text-right">
-                            <p className="text-sm font-medium text-emerald-600">
-                              Completadas: {progreso.realizadas}
-                            </p>
-                            <p className="text-sm font-medium text-amber-600">
-                              Pendientes: {progreso.pendientes}
+                    <AccordionItem key={progreso.sedeId} value={progreso.sedeId}>
+                      <AccordionTrigger className="hover:no-underline px-4 rounded-lg hover:bg-muted/50">
+                        <div className="flex flex-1 items-center justify-between pr-4">
+                          <div className="text-left">
+                            <p className="font-semibold text-sm">{progreso.sede}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {progreso.realizadas} de {progreso.metaTotal} encuestas
                             </p>
                           </div>
+                          <div className="flex items-center gap-4">
+                            <div className="hidden sm:flex items-center gap-3 text-xs">
+                              <span className="text-emerald-600 font-medium">Completadas: {progreso.realizadas}</span>
+                              <span className="text-amber-600 font-medium">Pendientes: {progreso.pendientes}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="w-24 h-2 overflow-hidden rounded-full bg-muted">
+                                <div
+                                  className="h-full bg-emerald-600 transition-all"
+                                  style={{ width: `${Math.min(100, parseFloat(progreso.porcentaje))}%` }}
+                                />
+                              </div>
+                              <span className="text-xs font-medium w-10 text-right">{progreso.porcentaje}%</span>
+                            </div>
+                          </div>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent className="px-4">
+                        <div className="flex justify-between items-center mb-3 sm:hidden text-xs">
+                          <span className="text-emerald-600 font-medium">Completadas: {progreso.realizadas}</span>
+                          <span className="text-amber-600 font-medium">Pendientes: {progreso.pendientes}</span>
+                        </div>
+                        <div className="flex justify-end mb-3">
                           <Button
                             variant="outline"
                             size="sm"
                             onClick={() => exportarProgresoSemanal(progreso.sedeId)}
                           >
                             <Download className="mr-2 h-4 w-4" />
-                            Semanal
+                            Exportar semanal
                           </Button>
                         </div>
-                      </div>
-
-                      {/* Barra de progreso */}
-                      <div className="mb-4 h-3 w-full overflow-hidden rounded-full bg-muted">
-                        <div
-                          className="h-full bg-emerald-600 transition-all"
-                          style={{ width: `${Math.min(100, parseFloat(progreso.porcentaje))}%` }}
-                        />
-                      </div>
-
-                      {/* Tabla de semanas */}
-                      <div className="overflow-x-auto">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Semana</TableHead>
-                              <TableHead>Periodo</TableHead>
-                              <TableHead className="text-center">Meta</TableHead>
-                              <TableHead className="text-center">Realizadas</TableHead>
-                              <TableHead className="text-center">Diferencia</TableHead>
-                              <TableHead className="text-center">Estado</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {progreso.semanas.map((semana) => {
-                              const diferencia = semana.realizadas - semana.meta
-                              return (
-                                <TableRow key={semana.semana}>
-                                  <TableCell className="font-medium">Semana {semana.semana}</TableCell>
-                                  <TableCell className="text-sm text-muted-foreground">
-                                    {format(semana.fechaInicio, "dd/MM")} - {format(semana.fechaFin, "dd/MM")}
-                                  </TableCell>
-                                  <TableCell className="text-center">{semana.meta}</TableCell>
-                                  <TableCell className="text-center">{semana.realizadas}</TableCell>
-                                  <TableCell className="text-center">
-                                    <span className={diferencia >= 0 ? "text-emerald-600" : "text-red-600"}>
-                                      {diferencia >= 0 ? "+" : ""}{diferencia}
-                                    </span>
-                                  </TableCell>
-                                  <TableCell className="text-center">
-                                    {diferencia >= 0 ? (
-                                      <Badge variant="default" className="bg-emerald-600">Cumplida</Badge>
-                                    ) : (
-                                      <Badge variant="destructive">Pendiente</Badge>
-                                    )}
-                                  </TableCell>
-                                </TableRow>
-                              )
-                            })}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </div>
+                        <div className="overflow-x-auto">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Semana</TableHead>
+                                <TableHead>Periodo</TableHead>
+                                <TableHead className="text-center">Meta</TableHead>
+                                <TableHead className="text-center">Realizadas</TableHead>
+                                <TableHead className="text-center">Diferencia</TableHead>
+                                <TableHead className="text-center">Estado</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {progreso.semanas.map((semana) => {
+                                const diferencia = semana.realizadas - semana.meta
+                                return (
+                                  <TableRow key={semana.semana}>
+                                    <TableCell className="font-medium">Semana {semana.semana}</TableCell>
+                                    <TableCell className="text-sm text-muted-foreground">
+                                      {format(semana.fechaInicio, "dd/MM")} - {format(semana.fechaFin, "dd/MM")}
+                                    </TableCell>
+                                    <TableCell className="text-center">{semana.meta}</TableCell>
+                                    <TableCell className="text-center">{semana.realizadas}</TableCell>
+                                    <TableCell className="text-center">
+                                      <span className={diferencia >= 0 ? "text-emerald-600" : "text-red-600"}>
+                                        {diferencia >= 0 ? "+" : ""}{diferencia}
+                                      </span>
+                                    </TableCell>
+                                    <TableCell className="text-center">
+                                      {diferencia >= 0 ? (
+                                        <Badge variant="default" className="bg-emerald-600">Cumplida</Badge>
+                                      ) : (
+                                        <Badge variant="destructive">Pendiente</Badge>
+                                      )}
+                                    </TableCell>
+                                  </TableRow>
+                                )
+                              })}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
                   ))}
-                </div>
+                </Accordion>
               )}
             </CardContent>
           </Card>
