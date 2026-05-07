@@ -33,7 +33,8 @@ import {
   TrendingUp,
   Star,
   ThumbsUp,
-  Users
+  Users,
+  Search
 } from "lucide-react"
 import { format, startOfWeek, endOfWeek, differenceInWeeks, addWeeks } from "date-fns"
 import { es } from "date-fns/locale"
@@ -112,6 +113,7 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardP
   const [filtroFechaFin, setFiltroFechaFin] = useState("")
   const [filtroSede, setFiltroSede] = useState<string>("all")
   const [currentPage, setCurrentPage] = useState(1)
+  const [busquedaSede, setBusquedaSede] = useState("")
 
   // Filtrar encuestas
   const encuestasFiltradas = useMemo(() => {
@@ -204,6 +206,13 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardP
       }
     })
   }, [encuestas, sedesMetas])
+
+  // Filtrar progreso de sedes por búsqueda
+  const progresoSedesFiltradas = useMemo(() => {
+    if (!busquedaSede.trim()) return progresoSedes
+    const termino = busquedaSede.toLowerCase().trim()
+    return progresoSedes.filter((p) => p.sede.toLowerCase().includes(termino))
+  }, [progresoSedes, busquedaSede])
 
   // Exportar a Excel
   const exportarExcel = () => {
@@ -556,20 +565,31 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardP
 
         <TabsContent value="metas" className="space-y-4">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <Target className="h-5 w-5" />
-                  Progreso por Sede
-                </CardTitle>
-                <CardDescription>
-                  Seguimiento de metas de encuestas por sede
-                </CardDescription>
+            <CardHeader>
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <Target className="h-5 w-5" />
+                    Progreso por Sede
+                  </CardTitle>
+                  <CardDescription>
+                    Seguimiento de metas de encuestas por sede ({progresoSedesFiltradas.length} de {progresoSedes.length} sedes)
+                  </CardDescription>
+                </div>
+                <Button onClick={exportarProgresoSedes} variant="outline">
+                  <Download className="mr-2 h-4 w-4" />
+                  Exportar Resumen
+                </Button>
               </div>
-              <Button onClick={exportarProgresoSedes} variant="outline">
-                <Download className="mr-2 h-4 w-4" />
-                Exportar Resumen
-              </Button>
+              <div className="relative mt-2">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar sede..."
+                  value={busquedaSede}
+                  onChange={(e) => setBusquedaSede(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
             </CardHeader>
             <CardContent>
               {progresoSedes.length === 0 ? (
@@ -582,9 +602,19 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardP
                     No hay metas de encuestas configuradas para las sedes.
                   </EmptyDescription>
                 </Empty>
+              ) : progresoSedesFiltradas.length === 0 ? (
+                <Empty>
+                  <EmptyMedia variant="icon">
+                    <Search className="h-5 w-5" />
+                  </EmptyMedia>
+                  <EmptyTitle>Sin resultados</EmptyTitle>
+                  <EmptyDescription>
+                    No se encontraron sedes que coincidan con &quot;{busquedaSede}&quot;.
+                  </EmptyDescription>
+                </Empty>
               ) : (
                 <div className="space-y-6">
-                  {progresoSedes.map((progreso) => (
+                  {progresoSedesFiltradas.map((progreso) => (
                     <div key={progreso.sedeId} className="rounded-lg border p-4">
                       <div className="mb-4 flex items-center justify-between">
                         <div>
