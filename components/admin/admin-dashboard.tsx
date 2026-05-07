@@ -1,0 +1,676 @@
+"use client"
+
+import { useState, useMemo } from "react"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { Badge } from "@/components/ui/badge"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Empty, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
+import { 
+  ClipboardList, 
+  Download, 
+  Filter, 
+  ChevronLeft, 
+  ChevronRight,
+  Target,
+  TrendingUp,
+  Star,
+  ThumbsUp,
+  Users
+} from "lucide-react"
+import { format, startOfWeek, endOfWeek, differenceInWeeks, addWeeks } from "date-fns"
+import { es } from "date-fns/locale"
+
+interface Encuesta {
+  id: string
+  fecha_atencion: string
+  eps_id: number | null
+  tipo_afiliado_id: number | null
+  experiencia_global: number
+  recomendaria_ips: number
+  atencion_personal: number
+  claridad_informacion: number
+  servicio_humanizado: number
+  recomendaciones_uso_seguro: number
+  medicamentos_oportunos: number
+  localizacion_acceso: number
+  horario_atencion: number
+  tiempo_solicitar_medicamentos: number
+  comodidad_limpieza: number
+  comentarios: string | null
+  created_at: string
+  sede_id: number
+  departamentos: { nombre: string } | null
+  municipios: { nombre: string } | null
+  sedes: { nombre: string } | null
+  eps: { nombre: string } | null
+  tipos_afiliado: { nombre: string } | null
+}
+
+interface Sede {
+  id: number
+  nombre: string
+}
+
+interface SedeMeta {
+  id: number
+  sede_id: number
+  meta_total: number
+  fecha_inicio: string
+  fecha_fin: string
+  sedes: { nombre: string } | null
+}
+
+interface AdminDashboardProps {
+  encuestas: Encuesta[]
+  sedes: Sede[]
+  sedesMetas: SedeMeta[]
+}
+
+const ITEMS_PER_PAGE = 10
+
+function getRatingBadge(value: number, max: number = 4) {
+  const percentage = (value / max) * 100
+  if (percentage >= 75) {
+    return <Badge variant="default" className="bg-emerald-600">Excelente</Badge>
+  } else if (percentage >= 50) {
+    return <Badge variant="default" className="bg-blue-600">Bueno</Badge>
+  } else if (percentage >= 25) {
+    return <Badge variant="secondary">Regular</Badge>
+  } else {
+    return <Badge variant="destructive">Malo</Badge>
+  }
+}
+
+function getWeekNumber(date: Date, startDate: Date): number {
+  return differenceInWeeks(date, startDate) + 1
+}
+
+function getTotalWeeks(startDate: Date, endDate: Date): number {
+  return differenceInWeeks(endDate, startDate) + 1
+}
+
+export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardProps) {
+  const [filtroFechaInicio, setFiltroFechaInicio] = useState("")
+  const [filtroFechaFin, setFiltroFechaFin] = useState("")
+  const [filtroSede, setFiltroSede] = useState<string>("all")
+  const [currentPage, setCurrentPage] = useState(1)
+
+  // Filtrar encuestas
+  const encuestasFiltradas = useMemo(() => {
+    return encuestas.filter((enc) => {
+      const fechaEnc = new Date(enc.fecha_atencion)
+      
+      if (filtroFechaInicio && fechaEnc < new Date(filtroFechaInicio)) {
+        return false
+      }
+      if (filtroFechaFin && fechaEnc > new Date(filtroFechaFin)) {
+        return false
+      }
+      if (filtroSede !== "all" && enc.sede_id !== parseInt(filtroSede)) {
+        return false
+      }
+      return true
+    })
+  }, [encuestas, filtroFechaInicio, filtroFechaFin, filtroSede])
+
+  // Paginación
+  const totalPages = Math.ceil(encuestasFiltradas.length / ITEMS_PER_PAGE)
+  const paginatedEncuestas = encuestasFiltradas.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE
+  )
+
+  // Calcular estadísticas
+  const stats = useMemo(() => {
+    const total = encuestasFiltradas.length
+    if (total === 0) {
+      return {
+        total: 0,
+        promedioExperiencia: "0.00",
+        promedioRecomendacion: "0.00",
+        promedioAtencion: "0.00",
+      }
+    }
+
+    const calcPromedio = (campo: keyof Encuesta) => {
+      const suma = encuestasFiltradas.reduce((acc, enc) => acc + ((enc[campo] as number) || 0), 0)
+      return (suma / total).toFixed(2)
+    }
+
+    return {
+      total,
+      promedioExperiencia: calcPromedio("experiencia_global"),
+      promedioRecomendacion: calcPromedio("recomendaria_ips"),
+      promedioAtencion: calcPromedio("atencion_personal"),
+    }
+  }, [encuestasFiltradas])
+
+  // Calcular progreso por sede
+  const progresoSedes = useMemo(() => {
+    return sedesMetas.map((meta) => {
+      const encuestasSede = encuestas.filter((enc) => enc.sede_id === meta.sede_id)
+      const totalRealizadas = encuestasSede.length
+      const porcentaje = meta.meta_total > 0 ? (totalRealizadas / meta.meta_total) * 100 : 0
+
+      const fechaInicio = new Date(meta.fecha_inicio)
+      const fechaFin = new Date(meta.fecha_fin)
+      const totalSemanas = getTotalWeeks(fechaInicio, fechaFin)
+      const metaSemanal = Math.ceil(meta.meta_total / totalSemanas)
+
+      // Calcular progreso por semana
+      const semanas: { semana: number; realizadas: number; meta: number; fechaInicio: Date; fechaFin: Date }[] = []
+      for (let i = 0; i < totalSemanas; i++) {
+        const semanaInicio = addWeeks(fechaInicio, i)
+        const semanaFin = endOfWeek(semanaInicio, { weekStartsOn: 1 })
+        const encuestasSemana = encuestasSede.filter((enc) => {
+          const fecha = new Date(enc.created_at)
+          return fecha >= semanaInicio && fecha <= semanaFin
+        })
+        semanas.push({
+          semana: i + 1,
+          realizadas: encuestasSemana.length,
+          meta: metaSemanal,
+          fechaInicio: semanaInicio,
+          fechaFin: semanaFin,
+        })
+      }
+
+      return {
+        sede: meta.sedes?.nombre || "Desconocida",
+        sedeId: meta.sede_id,
+        metaTotal: meta.meta_total,
+        realizadas: totalRealizadas,
+        pendientes: Math.max(0, meta.meta_total - totalRealizadas),
+        porcentaje: porcentaje.toFixed(1),
+        semanas,
+      }
+    })
+  }, [encuestas, sedesMetas])
+
+  // Exportar a Excel
+  const exportarExcel = () => {
+    const headers = [
+      "ID",
+      "Fecha Atención",
+      "Departamento",
+      "Municipio",
+      "Sede",
+      "EPS",
+      "Tipo Afiliado",
+      "Atención Personal",
+      "Claridad Información",
+      "Servicio Humanizado",
+      "Recomendaciones Uso Seguro",
+      "Medicamentos Oportunos",
+      "Localización Acceso",
+      "Horario Atención",
+      "Tiempo Solicitar Medicamentos",
+      "Comodidad Limpieza",
+      "Experiencia Global",
+      "Recomendaría IPS",
+      "Comentarios",
+      "Fecha Registro",
+    ]
+
+    const rows = encuestasFiltradas.map((enc) => [
+      enc.id,
+      enc.fecha_atencion,
+      enc.departamentos?.nombre || "",
+      enc.municipios?.nombre || "",
+      enc.sedes?.nombre || "",
+      enc.eps?.nombre || "",
+      enc.tipos_afiliado?.nombre || "",
+      enc.atencion_personal || "",
+      enc.claridad_informacion || "",
+      enc.servicio_humanizado || "",
+      enc.recomendaciones_uso_seguro || "",
+      enc.medicamentos_oportunos || "",
+      enc.localizacion_acceso || "",
+      enc.horario_atencion || "",
+      enc.tiempo_solicitar_medicamentos || "",
+      enc.comodidad_limpieza || "",
+      enc.experiencia_global || "",
+      enc.recomendaria_ips || "",
+      enc.comentarios || "",
+      enc.created_at,
+    ])
+
+    const csvContent = [
+      headers.join(","),
+      ...rows.map((row) => row.map((cell) => `"${cell}"`).join(",")),
+    ].join("\n")
+
+    const blob = new Blob(["\ufeff" + csvContent], { type: "text/csv;charset=utf-8;" })
+    const link = document.createElement("a")
+    link.href = URL.createObjectURL(blob)
+    link.download = `encuestas_${format(new Date(), "yyyy-MM-dd")}.csv`
+    link.click()
+  }
+
+  // Exportar progreso por sede
+  const exportarProgresoSedes = () => {
+    const headers = ["Sede", "Meta Total", "Realizadas", "Pendientes", "Porcentaje"]
+    const rows = progresoSedes.map((p) => [
+      p.sede,
+      p.metaTotal,
+      p.realizadas,
+      p.pendientes,
+      `${p.porcentaje}%`,
+    ])
+
+    const csvContent = [
+      headers.join(","),
+      ...rows.map((row) => row.map((cell) => `"${cell}"`).join(",")),
+    ].join("\n")
+
+    const blob = new Blob(["\ufeff" + csvContent], { type: "text/csv;charset=utf-8;" })
+    const link = document.createElement("a")
+    link.href = URL.createObjectURL(blob)
+    link.download = `progreso_sedes_${format(new Date(), "yyyy-MM-dd")}.csv`
+    link.click()
+  }
+
+  // Exportar progreso semanal por sede
+  const exportarProgresoSemanal = (sedeId: number) => {
+    const progreso = progresoSedes.find((p) => p.sedeId === sedeId)
+    if (!progreso) return
+
+    const headers = ["Semana", "Fecha Inicio", "Fecha Fin", "Meta", "Realizadas", "Diferencia"]
+    const rows = progreso.semanas.map((s) => [
+      `Semana ${s.semana}`,
+      format(s.fechaInicio, "dd/MM/yyyy"),
+      format(s.fechaFin, "dd/MM/yyyy"),
+      s.meta,
+      s.realizadas,
+      s.realizadas - s.meta,
+    ])
+
+    const csvContent = [
+      headers.join(","),
+      ...rows.map((row) => row.map((cell) => `"${cell}"`).join(",")),
+    ].join("\n")
+
+    const blob = new Blob(["\ufeff" + csvContent], { type: "text/csv;charset=utf-8;" })
+    const link = document.createElement("a")
+    link.href = URL.createObjectURL(blob)
+    link.download = `progreso_semanal_${progreso.sede}_${format(new Date(), "yyyy-MM-dd")}.csv`
+    link.click()
+  }
+
+  const limpiarFiltros = () => {
+    setFiltroFechaInicio("")
+    setFiltroFechaFin("")
+    setFiltroSede("all")
+    setCurrentPage(1)
+  }
+
+  const statCards = [
+    {
+      title: "Total Encuestas",
+      value: stats.total.toString(),
+      description: "Encuestas completadas",
+      icon: ClipboardList,
+      iconColor: "text-blue-600",
+      bgColor: "bg-blue-100",
+    },
+    {
+      title: "Experiencia Global",
+      value: stats.promedioExperiencia,
+      description: "Promedio de 1-5",
+      icon: Star,
+      iconColor: "text-amber-600",
+      bgColor: "bg-amber-100",
+    },
+    {
+      title: "Recomendación",
+      value: stats.promedioRecomendacion,
+      description: "Promedio de 1-4",
+      icon: ThumbsUp,
+      iconColor: "text-emerald-600",
+      bgColor: "bg-emerald-100",
+    },
+    {
+      title: "Atención Personal",
+      value: stats.promedioAtencion,
+      description: "Promedio de 1-4",
+      icon: Users,
+      iconColor: "text-indigo-600",
+      bgColor: "bg-indigo-100",
+    },
+  ]
+
+  return (
+    <div className="space-y-6">
+      {/* Estadísticas */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {statCards.map((stat) => (
+          <Card key={stat.title}>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                {stat.title}
+              </CardTitle>
+              <div className={`rounded-lg p-2 ${stat.bgColor}`}>
+                <stat.icon className={`h-4 w-4 ${stat.iconColor}`} />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stat.value}</div>
+              <p className="text-xs text-muted-foreground">{stat.description}</p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <Tabs defaultValue="encuestas" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="encuestas">Encuestas</TabsTrigger>
+          <TabsTrigger value="metas">Metas por Sede</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="encuestas" className="space-y-4">
+          {/* Filtros */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Filter className="h-5 w-5" />
+                Filtros
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="space-y-2">
+                  <Label htmlFor="fecha-inicio">Fecha Inicio</Label>
+                  <Input
+                    id="fecha-inicio"
+                    type="date"
+                    value={filtroFechaInicio}
+                    onChange={(e) => {
+                      setFiltroFechaInicio(e.target.value)
+                      setCurrentPage(1)
+                    }}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="fecha-fin">Fecha Fin</Label>
+                  <Input
+                    id="fecha-fin"
+                    type="date"
+                    value={filtroFechaFin}
+                    onChange={(e) => {
+                      setFiltroFechaFin(e.target.value)
+                      setCurrentPage(1)
+                    }}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="sede">Sede</Label>
+                  <Select 
+                    value={filtroSede} 
+                    onValueChange={(value) => {
+                      setFiltroSede(value)
+                      setCurrentPage(1)
+                    }}
+                  >
+                    <SelectTrigger id="sede">
+                      <SelectValue placeholder="Todas las sedes" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todas las sedes</SelectItem>
+                      {sedes.map((sede) => (
+                        <SelectItem key={sede.id} value={sede.id.toString()}>
+                          {sede.nombre}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-end gap-2">
+                  <Button variant="outline" onClick={limpiarFiltros} className="flex-1">
+                    Limpiar
+                  </Button>
+                  <Button onClick={exportarExcel} className="flex-1">
+                    <Download className="mr-2 h-4 w-4" />
+                    Exportar
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Tabla de encuestas */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Encuestas</CardTitle>
+              <CardDescription>
+                Mostrando {paginatedEncuestas.length} de {encuestasFiltradas.length} encuestas
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {paginatedEncuestas.length === 0 ? (
+                <Empty>
+                  <EmptyMedia variant="icon">
+                    <ClipboardList className="h-5 w-5" />
+                  </EmptyMedia>
+                  <EmptyTitle>No hay encuestas</EmptyTitle>
+                  <EmptyDescription>
+                    No se encontraron encuestas con los filtros aplicados.
+                  </EmptyDescription>
+                </Empty>
+              ) : (
+                <>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Fecha Atención</TableHead>
+                          <TableHead>Sede</TableHead>
+                          <TableHead>EPS</TableHead>
+                          <TableHead>Tipo</TableHead>
+                          <TableHead>Experiencia</TableHead>
+                          <TableHead>Recomienda</TableHead>
+                          <TableHead className="text-right">Registrado</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {paginatedEncuestas.map((encuesta) => (
+                          <TableRow key={encuesta.id}>
+                            <TableCell className="font-medium">
+                              {format(new Date(encuesta.fecha_atencion), "dd MMM yyyy", { locale: es })}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-col">
+                                <span className="text-sm font-medium">
+                                  {encuesta.sedes?.nombre || "N/A"}
+                                </span>
+                                <span className="text-xs text-muted-foreground">
+                                  {encuesta.municipios?.nombre}, {encuesta.departamentos?.nombre}
+                                </span>
+                              </div>
+                            </TableCell>
+                            <TableCell>{encuesta.eps?.nombre || "N/A"}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline">{encuesta.tipos_afiliado?.nombre || "N/A"}</Badge>
+                            </TableCell>
+                            <TableCell>{getRatingBadge(encuesta.experiencia_global, 5)}</TableCell>
+                            <TableCell>{getRatingBadge(encuesta.recomendaria_ips, 4)}</TableCell>
+                            <TableCell className="text-right text-sm text-muted-foreground">
+                              {format(new Date(encuesta.created_at), "dd/MM/yyyy HH:mm", { locale: es })}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  {/* Paginación */}
+                  {totalPages > 1 && (
+                    <div className="mt-4 flex items-center justify-between">
+                      <p className="text-sm text-muted-foreground">
+                        Página {currentPage} de {totalPages}
+                      </p>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                          disabled={currentPage === 1}
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                          Anterior
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                          disabled={currentPage === totalPages}
+                        >
+                          Siguiente
+                          <ChevronRight className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="metas" className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Target className="h-5 w-5" />
+                  Progreso por Sede
+                </CardTitle>
+                <CardDescription>
+                  Seguimiento de metas de encuestas por sede
+                </CardDescription>
+              </div>
+              <Button onClick={exportarProgresoSedes} variant="outline">
+                <Download className="mr-2 h-4 w-4" />
+                Exportar Resumen
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {progresoSedes.length === 0 ? (
+                <Empty>
+                  <EmptyMedia variant="icon">
+                    <Target className="h-5 w-5" />
+                  </EmptyMedia>
+                  <EmptyTitle>Sin metas configuradas</EmptyTitle>
+                  <EmptyDescription>
+                    No hay metas de encuestas configuradas para las sedes.
+                  </EmptyDescription>
+                </Empty>
+              ) : (
+                <div className="space-y-6">
+                  {progresoSedes.map((progreso) => (
+                    <div key={progreso.sedeId} className="rounded-lg border p-4">
+                      <div className="mb-4 flex items-center justify-between">
+                        <div>
+                          <h3 className="font-semibold">{progreso.sede}</h3>
+                          <p className="text-sm text-muted-foreground">
+                            {progreso.realizadas} de {progreso.metaTotal} encuestas ({progreso.porcentaje}%)
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <div className="text-right">
+                            <p className="text-sm font-medium text-emerald-600">
+                              Completadas: {progreso.realizadas}
+                            </p>
+                            <p className="text-sm font-medium text-amber-600">
+                              Pendientes: {progreso.pendientes}
+                            </p>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => exportarProgresoSemanal(progreso.sedeId)}
+                          >
+                            <Download className="mr-2 h-4 w-4" />
+                            Semanal
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* Barra de progreso */}
+                      <div className="mb-4 h-3 w-full overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full bg-emerald-600 transition-all"
+                          style={{ width: `${Math.min(100, parseFloat(progreso.porcentaje))}%` }}
+                        />
+                      </div>
+
+                      {/* Tabla de semanas */}
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Semana</TableHead>
+                              <TableHead>Periodo</TableHead>
+                              <TableHead className="text-center">Meta</TableHead>
+                              <TableHead className="text-center">Realizadas</TableHead>
+                              <TableHead className="text-center">Diferencia</TableHead>
+                              <TableHead className="text-center">Estado</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {progreso.semanas.map((semana) => {
+                              const diferencia = semana.realizadas - semana.meta
+                              return (
+                                <TableRow key={semana.semana}>
+                                  <TableCell className="font-medium">Semana {semana.semana}</TableCell>
+                                  <TableCell className="text-sm text-muted-foreground">
+                                    {format(semana.fechaInicio, "dd/MM")} - {format(semana.fechaFin, "dd/MM")}
+                                  </TableCell>
+                                  <TableCell className="text-center">{semana.meta}</TableCell>
+                                  <TableCell className="text-center">{semana.realizadas}</TableCell>
+                                  <TableCell className="text-center">
+                                    <span className={diferencia >= 0 ? "text-emerald-600" : "text-red-600"}>
+                                      {diferencia >= 0 ? "+" : ""}{diferencia}
+                                    </span>
+                                  </TableCell>
+                                  <TableCell className="text-center">
+                                    {diferencia >= 0 ? (
+                                      <Badge variant="default" className="bg-emerald-600">Cumplida</Badge>
+                                    ) : (
+                                      <Badge variant="destructive">Pendiente</Badge>
+                                    )}
+                                  </TableCell>
+                                </TableRow>
+                              )
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </div>
+  )
+}
