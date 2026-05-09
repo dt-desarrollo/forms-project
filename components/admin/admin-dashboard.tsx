@@ -183,10 +183,12 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardP
       const totalSemanas = getTotalWeeks(fechaInicio, fechaFin)
       const metaSemanal = Math.ceil(meta.meta_total / totalSemanas)
 
-      // Calcular progreso por semana
+      // Calcular progreso por semana (lunes a domingo)
       const semanas: { semana: number; realizadas: number; meta: number; fechaInicio: Date; fechaFin: Date }[] = []
+      // Anclar al lunes de la semana de inicio del periodo
+      const primerLunes = startOfWeek(fechaInicio, { weekStartsOn: 1 })
       for (let i = 0; i < totalSemanas; i++) {
-        const semanaInicio = addWeeks(fechaInicio, i)
+        const semanaInicio = addWeeks(primerLunes, i)
         const semanaFin = endOfWeek(semanaInicio, { weekStartsOn: 1 })
         const encuestasSemana = encuestasSede.filter((enc) => {
           const fecha = new Date(enc.created_at)
@@ -677,9 +679,22 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardP
                             <TableBody>
                               {progreso.semanas.map((semana) => {
                                 const diferencia = semana.realizadas - semana.meta
+                                const grupoColor = [
+                                  "bg-blue-500",
+                                  "bg-emerald-500",
+                                  "bg-amber-500",
+                                  "bg-rose-500",
+                                  "bg-violet-500",
+                                  "bg-cyan-500",
+                                ][Math.floor((semana.semana - 1) / 4) % 6]
                                 return (
                                   <TableRow key={semana.semana}>
-                                    <TableCell className="font-medium">Semana {semana.semana}</TableCell>
+                                    <TableCell className="font-medium">
+                                      <span className="flex items-center gap-2">
+                                        <span className={`inline-block h-2 w-2 rounded-full flex-shrink-0 ${grupoColor}`} />
+                                        Semana {semana.semana}
+                                      </span>
+                                    </TableCell>
                                     <TableCell className="text-sm text-muted-foreground">
                                       {format(semana.fechaInicio, "dd/MM")} - {format(semana.fechaFin, "dd/MM")}
                                     </TableCell>
