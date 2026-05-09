@@ -3,8 +3,8 @@ CREATE TABLE IF NOT EXISTS sedes_metas (
   id SERIAL PRIMARY KEY,
   sede_id INTEGER REFERENCES sedes(id) ON DELETE CASCADE,
   meta_total INTEGER NOT NULL DEFAULT 0,
-  fecha_inicio DATE NOT NULL DEFAULT '2025-01-01',
-  fecha_fin DATE NOT NULL DEFAULT '2025-12-31',
+  fecha_inicio DATE NOT NULL DEFAULT '2026-04-01',
+  fecha_fin DATE NOT NULL DEFAULT '2026-12-31',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   UNIQUE(sede_id)
@@ -19,7 +19,7 @@ CREATE POLICY "sedes_metas_select" ON sedes_metas FOR SELECT USING (true);
 
 -- Insertar las metas por sede usando el nombre para encontrar el id
 INSERT INTO sedes_metas (sede_id, meta_total, fecha_inicio, fecha_fin)
-SELECT s.id, m.meta, '2025-01-01', '2025-12-31'
+SELECT s.id, m.meta, '2026-04-01', '2026-12-31'
 FROM (VALUES
   ('ABREGO', 7),
   ('AGUACHICA', 18),

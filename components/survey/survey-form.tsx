@@ -398,6 +398,9 @@ export function SurveyForm() {
         <h1 className="text-xl md:text-2xl font-bold text-foreground">
           Encuesta de Satisfacción del Usuario
         </h1>
+        <p className="text-xs text-muted-foreground leading-relaxed max-w-xl mx-auto border border-border rounded-md px-4 py-3 bg-muted/40">
+          Los datos personales que usted proporcione en este formulario serán tratados por <strong>PHARMASAN SAS</strong> de acuerdo con la Ley 1581 de 2012 y su normatividad complementaria. PHARMASAN SAS garantiza la confidencialidad, seguridad y protección de sus datos personales.
+        </p>
       </div>
 
       {/* Sección 1: Información General */}

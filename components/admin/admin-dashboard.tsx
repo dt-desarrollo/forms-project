@@ -20,6 +20,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Empty, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
@@ -33,7 +39,8 @@ import {
   TrendingUp,
   Star,
   ThumbsUp,
-  Users
+  Users,
+  Search
 } from "lucide-react"
 import { format, startOfWeek, endOfWeek, differenceInWeeks, addWeeks } from "date-fns"
 import { es } from "date-fns/locale"
@@ -112,6 +119,7 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardP
   const [filtroFechaFin, setFiltroFechaFin] = useState("")
   const [filtroSede, setFiltroSede] = useState<string>("all")
   const [currentPage, setCurrentPage] = useState(1)
+  const [busquedaSede, setBusquedaSede] = useState("")
 
   // Filtrar encuestas
   const encuestasFiltradas = useMemo(() => {
@@ -175,10 +183,12 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardP
       const totalSemanas = getTotalWeeks(fechaInicio, fechaFin)
       const metaSemanal = Math.ceil(meta.meta_total / totalSemanas)
 
-      // Calcular progreso por semana
+      // Calcular progreso por semana (lunes a domingo)
       const semanas: { semana: number; realizadas: number; meta: number; fechaInicio: Date; fechaFin: Date }[] = []
+      // Anclar al lunes de la semana de inicio del periodo
+      const primerLunes = startOfWeek(fechaInicio, { weekStartsOn: 1 })
       for (let i = 0; i < totalSemanas; i++) {
-        const semanaInicio = addWeeks(fechaInicio, i)
+        const semanaInicio = addWeeks(primerLunes, i)
         const semanaFin = endOfWeek(semanaInicio, { weekStartsOn: 1 })
         const encuestasSemana = encuestasSede.filter((enc) => {
           const fecha = new Date(enc.created_at)
@@ -204,6 +214,13 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardP
       }
     })
   }, [encuestas, sedesMetas])
+
+  // Filtrar progreso de sedes por búsqueda
+  const progresoSedesFiltradas = useMemo(() => {
+    if (!busquedaSede.trim()) return progresoSedes
+    const termino = busquedaSede.toLowerCase().trim()
+    return progresoSedes.filter((p) => p.sede.toLowerCase().includes(termino))
+  }, [progresoSedes, busquedaSede])
 
   // Exportar a Excel
   const exportarExcel = () => {
@@ -556,20 +573,31 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardP
 
         <TabsContent value="metas" className="space-y-4">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <Target className="h-5 w-5" />
-                  Progreso por Sede
-                </CardTitle>
-                <CardDescription>
-                  Seguimiento de metas de encuestas por sede
-                </CardDescription>
+            <CardHeader>
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <Target className="h-5 w-5" />
+                    Progreso por Sede
+                  </CardTitle>
+                  <CardDescription>
+                    Seguimiento de metas de encuestas por sede ({progresoSedesFiltradas.length} de {progresoSedes.length} sedes)
+                  </CardDescription>
+                </div>
+                <Button onClick={exportarProgresoSedes} variant="outline">
+                  <Download className="mr-2 h-4 w-4" />
+                  Exportar Resumen
+                </Button>
               </div>
-              <Button onClick={exportarProgresoSedes} variant="outline">
-                <Download className="mr-2 h-4 w-4" />
-                Exportar Resumen
-              </Button>
+              <div className="relative mt-2">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar sede..."
+                  value={busquedaSede}
+                  onChange={(e) => setBusquedaSede(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
             </CardHeader>
             <CardContent>
               {progresoSedes.length === 0 ? (
@@ -582,90 +610,118 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardP
                     No hay metas de encuestas configuradas para las sedes.
                   </EmptyDescription>
                 </Empty>
+              ) : progresoSedesFiltradas.length === 0 ? (
+                <Empty>
+                  <EmptyMedia variant="icon">
+                    <Search className="h-5 w-5" />
+                  </EmptyMedia>
+                  <EmptyTitle>Sin resultados</EmptyTitle>
+                  <EmptyDescription>
+                    No se encontraron sedes que coincidan con &quot;{busquedaSede}&quot;.
+                  </EmptyDescription>
+                </Empty>
               ) : (
-                <div className="space-y-6">
-                  {progresoSedes.map((progreso) => (
-                    <div key={progreso.sedeId} className="rounded-lg border p-4">
-                      <div className="mb-4 flex items-center justify-between">
-                        <div>
-                          <h3 className="font-semibold">{progreso.sede}</h3>
-                          <p className="text-sm text-muted-foreground">
-                            {progreso.realizadas} de {progreso.metaTotal} encuestas ({progreso.porcentaje}%)
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-4">
-                          <div className="text-right">
-                            <p className="text-sm font-medium text-emerald-600">
-                              Completadas: {progreso.realizadas}
-                            </p>
-                            <p className="text-sm font-medium text-amber-600">
-                              Pendientes: {progreso.pendientes}
+                <Accordion type="single" collapsible className="w-full">
+                  {progresoSedesFiltradas.map((progreso) => (
+                    <AccordionItem key={progreso.sedeId} value={progreso.sedeId}>
+                      <AccordionTrigger className="hover:no-underline px-4 rounded-lg hover:bg-muted/50">
+                        <div className="flex flex-1 items-center justify-between pr-4">
+                          <div className="text-left">
+                            <p className="font-semibold text-sm">{progreso.sede}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {progreso.realizadas} de {progreso.metaTotal} encuestas
                             </p>
                           </div>
+                          <div className="flex items-center gap-4">
+                            <div className="hidden sm:flex items-center gap-3 text-xs">
+                              <span className="text-emerald-600 font-medium">Completadas: {progreso.realizadas}</span>
+                              <span className="text-amber-600 font-medium">Pendientes: {progreso.pendientes}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="w-24 h-2 overflow-hidden rounded-full bg-muted">
+                                <div
+                                  className="h-full bg-emerald-600 transition-all"
+                                  style={{ width: `${Math.min(100, parseFloat(progreso.porcentaje))}%` }}
+                                />
+                              </div>
+                              <span className="text-xs font-medium w-10 text-right">{progreso.porcentaje}%</span>
+                            </div>
+                          </div>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent className="px-4">
+                        <div className="flex justify-between items-center mb-3 sm:hidden text-xs">
+                          <span className="text-emerald-600 font-medium">Completadas: {progreso.realizadas}</span>
+                          <span className="text-amber-600 font-medium">Pendientes: {progreso.pendientes}</span>
+                        </div>
+                        <div className="flex justify-end mb-3">
                           <Button
                             variant="outline"
                             size="sm"
                             onClick={() => exportarProgresoSemanal(progreso.sedeId)}
                           >
                             <Download className="mr-2 h-4 w-4" />
-                            Semanal
+                            Exportar semanal
                           </Button>
                         </div>
-                      </div>
-
-                      {/* Barra de progreso */}
-                      <div className="mb-4 h-3 w-full overflow-hidden rounded-full bg-muted">
-                        <div
-                          className="h-full bg-emerald-600 transition-all"
-                          style={{ width: `${Math.min(100, parseFloat(progreso.porcentaje))}%` }}
-                        />
-                      </div>
-
-                      {/* Tabla de semanas */}
-                      <div className="overflow-x-auto">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Semana</TableHead>
-                              <TableHead>Periodo</TableHead>
-                              <TableHead className="text-center">Meta</TableHead>
-                              <TableHead className="text-center">Realizadas</TableHead>
-                              <TableHead className="text-center">Diferencia</TableHead>
-                              <TableHead className="text-center">Estado</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {progreso.semanas.map((semana) => {
-                              const diferencia = semana.realizadas - semana.meta
-                              return (
-                                <TableRow key={semana.semana}>
-                                  <TableCell className="font-medium">Semana {semana.semana}</TableCell>
-                                  <TableCell className="text-sm text-muted-foreground">
-                                    {format(semana.fechaInicio, "dd/MM")} - {format(semana.fechaFin, "dd/MM")}
-                                  </TableCell>
-                                  <TableCell className="text-center">{semana.meta}</TableCell>
-                                  <TableCell className="text-center">{semana.realizadas}</TableCell>
-                                  <TableCell className="text-center">
-                                    <span className={diferencia >= 0 ? "text-emerald-600" : "text-red-600"}>
-                                      {diferencia >= 0 ? "+" : ""}{diferencia}
-                                    </span>
-                                  </TableCell>
-                                  <TableCell className="text-center">
-                                    {diferencia >= 0 ? (
-                                      <Badge variant="default" className="bg-emerald-600">Cumplida</Badge>
-                                    ) : (
-                                      <Badge variant="destructive">Pendiente</Badge>
-                                    )}
-                                  </TableCell>
-                                </TableRow>
-                              )
-                            })}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </div>
+                        <div className="overflow-x-auto">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Semana</TableHead>
+                                <TableHead>Periodo</TableHead>
+                                <TableHead className="text-center">Meta</TableHead>
+                                <TableHead className="text-center">Realizadas</TableHead>
+                                <TableHead className="text-center">Diferencia</TableHead>
+                                <TableHead className="text-center">Estado</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {progreso.semanas.map((semana) => {
+                                const diferencia = semana.realizadas - semana.meta
+                                const grupoColor = [
+                                  "bg-blue-500",
+                                  "bg-emerald-500",
+                                  "bg-amber-500",
+                                  "bg-rose-500",
+                                  "bg-violet-500",
+                                  "bg-cyan-500",
+                                ][Math.floor((semana.semana - 1) / 4) % 6]
+                                return (
+                                  <TableRow key={semana.semana}>
+                                    <TableCell className="font-medium">
+                                      <span className="flex items-center gap-2">
+                                        <span className={`inline-block h-2 w-2 rounded-full flex-shrink-0 ${grupoColor}`} />
+                                        Semana {semana.semana}
+                                      </span>
+                                    </TableCell>
+                                    <TableCell className="text-sm text-muted-foreground">
+                                      {format(semana.fechaInicio, "dd/MM")} - {format(semana.fechaFin, "dd/MM")}
+                                    </TableCell>
+                                    <TableCell className="text-center">{semana.meta}</TableCell>
+                                    <TableCell className="text-center">{semana.realizadas}</TableCell>
+                                    <TableCell className="text-center">
+                                      <span className={diferencia >= 0 ? "text-emerald-600" : "text-red-600"}>
+                                        {diferencia >= 0 ? "+" : ""}{diferencia}
+                                      </span>
+                                    </TableCell>
+                                    <TableCell className="text-center">
+                                      {diferencia >= 0 ? (
+                                        <Badge variant="default" className="bg-emerald-600">Cumplida</Badge>
+                                      ) : (
+                                        <Badge variant="destructive">Pendiente</Badge>
+                                      )}
+                                    </TableCell>
+                                  </TableRow>
+                                )
+                              })}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
                   ))}
-                </div>
+                </Accordion>
               )}
             </CardContent>
           </Card>
