@@ -177,16 +177,15 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardP
 
     return sedesMetas.map((meta) => {
       const encuestasSede = encuestas.filter((enc) => enc.sede_id === meta.sede_id)
-      // Total anual
-      const totalRealizadasAnual = encuestasSede.length
-      const pendientesAnual = Math.max(0, meta.meta_total - totalRealizadasAnual)
 
-      // Calcular meta mensual: dividir la meta anual entre los meses del periodo
+      // meta_total ya es la meta MENSUAL
+      const metaMensual = meta.meta_total
+
+      // Meta anual = meta mensual × número de meses del periodo
       const fechaInicio = new Date(meta.fecha_inicio)
       const fechaFin = new Date(meta.fecha_fin)
-      // Número de meses completos en el periodo (ej: abr-dic = 9 meses)
       const totalMeses = differenceInCalendarMonths(fechaFin, fechaInicio) + 1
-      const metaMensual = Math.ceil(meta.meta_total / totalMeses)
+      const metaAnual = metaMensual * totalMeses
 
       // Encuestas realizadas en el mes actual
       const inicioMesActual = startOfMonth(hoy)
@@ -196,14 +195,20 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardP
         return fecha >= inicioMesActual && fecha <= finMesActual
       }).length
 
+      // Totales anuales
+      const totalRealizadasAnual = encuestasSede.length
+      const pendientesAnual = Math.max(0, metaAnual - totalRealizadasAnual)
+
+      // Porcentaje sobre la meta mensual
       const porcentajeMensual = metaMensual > 0 ? (realizadasMesActual / metaMensual) * 100 : 0
 
+      // Meta semanal derivada de la meta mensual (≈ 4.33 semanas/mes)
       const totalSemanas = getTotalWeeks(fechaInicio, fechaFin)
-      const metaSemanal = Math.ceil(meta.meta_total / totalSemanas)
+      const semanasPorMes = totalMeses > 0 ? totalSemanas / totalMeses : 1
+      const metaSemanal = Math.ceil(metaMensual / semanasPorMes)
 
       // Calcular progreso por semana (lunes a domingo)
       const semanas: { semana: number; realizadas: number; meta: number; fechaInicio: Date; fechaFin: Date }[] = []
-      // Anclar al lunes de la semana de inicio del periodo
       const primerLunes = startOfWeek(fechaInicio, { weekStartsOn: 1 })
       for (let i = 0; i < totalSemanas; i++) {
         const semanaInicio = addWeeks(primerLunes, i)
@@ -224,12 +229,12 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardP
       return {
         sede: meta.sedes?.nombre || "Desconocida",
         sedeId: meta.sede_id,
-        metaTotal: meta.meta_total,          // anual
-        metaMensual,                          // mensual (meta_total / meses del periodo)
-        realizadasMesActual,                  // encuestas este mes
-        realizadas: totalRealizadasAnual,     // anual
-        pendientes: pendientesAnual,          // anual
-        porcentaje: porcentajeMensual.toFixed(1), // % sobre meta mensual
+        metaTotal: metaAnual,                    // meta anual calculada
+        metaMensual,                              // meta mensual (valor directo de BD)
+        realizadasMesActual,                      // encuestas en el mes actual
+        realizadas: totalRealizadasAnual,         // total anual acumulado
+        pendientes: pendientesAnual,              // pendientes para completar la meta anual
+        porcentaje: porcentajeMensual.toFixed(1), // % sobre la meta mensual
         semanas,
       }
     })
