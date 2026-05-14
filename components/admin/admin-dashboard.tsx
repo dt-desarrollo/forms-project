@@ -42,7 +42,7 @@ import {
   Users,
   Search
 } from "lucide-react"
-import { format, startOfWeek, endOfWeek, differenceInWeeks, addWeeks } from "date-fns"
+import { format, startOfWeek, endOfWeek, differenceInWeeks, addWeeks, startOfMonth, endOfMonth, differenceInCalendarMonths } from "date-fns"
 import { es } from "date-fns/locale"
 
 interface Encuesta {
@@ -173,13 +173,31 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardP
 
   // Calcular progreso por sede
   const progresoSedes = useMemo(() => {
+    const hoy = new Date()
+
     return sedesMetas.map((meta) => {
       const encuestasSede = encuestas.filter((enc) => enc.sede_id === meta.sede_id)
-      const totalRealizadas = encuestasSede.length
-      const porcentaje = meta.meta_total > 0 ? (totalRealizadas / meta.meta_total) * 100 : 0
+      // Total anual
+      const totalRealizadasAnual = encuestasSede.length
+      const pendientesAnual = Math.max(0, meta.meta_total - totalRealizadasAnual)
 
+      // Calcular meta mensual: dividir la meta anual entre los meses del periodo
       const fechaInicio = new Date(meta.fecha_inicio)
       const fechaFin = new Date(meta.fecha_fin)
+      // Número de meses completos en el periodo (ej: abr-dic = 9 meses)
+      const totalMeses = differenceInCalendarMonths(fechaFin, fechaInicio) + 1
+      const metaMensual = Math.ceil(meta.meta_total / totalMeses)
+
+      // Encuestas realizadas en el mes actual
+      const inicioMesActual = startOfMonth(hoy)
+      const finMesActual = endOfMonth(hoy)
+      const realizadasMesActual = encuestasSede.filter((enc) => {
+        const fecha = new Date(enc.created_at)
+        return fecha >= inicioMesActual && fecha <= finMesActual
+      }).length
+
+      const porcentajeMensual = metaMensual > 0 ? (realizadasMesActual / metaMensual) * 100 : 0
+
       const totalSemanas = getTotalWeeks(fechaInicio, fechaFin)
       const metaSemanal = Math.ceil(meta.meta_total / totalSemanas)
 
@@ -206,10 +224,12 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardP
       return {
         sede: meta.sedes?.nombre || "Desconocida",
         sedeId: meta.sede_id,
-        metaTotal: meta.meta_total,
-        realizadas: totalRealizadas,
-        pendientes: Math.max(0, meta.meta_total - totalRealizadas),
-        porcentaje: porcentaje.toFixed(1),
+        metaTotal: meta.meta_total,          // anual
+        metaMensual,                          // mensual (meta_total / meses del periodo)
+        realizadasMesActual,                  // encuestas este mes
+        realizadas: totalRealizadasAnual,     // anual
+        pendientes: pendientesAnual,          // anual
+        porcentaje: porcentajeMensual.toFixed(1), // % sobre meta mensual
         semanas,
       }
     })
@@ -581,7 +601,7 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardP
                     Progreso por Sede
                   </CardTitle>
                   <CardDescription>
-                    Seguimiento de metas de encuestas por sede ({progresoSedesFiltradas.length} de {progresoSedes.length} sedes)
+                    Seguimiento de metas anuales por sede ({progresoSedesFiltradas.length} de {progresoSedes.length} sedes). El progreso y el contador muestran el mes actual; completadas y pendientes son totales anuales.
                   </CardDescription>
                 </div>
                 <Button onClick={exportarProgresoSedes} variant="outline">
@@ -629,13 +649,13 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardP
                           <div className="text-left">
                             <p className="font-semibold text-sm">{progreso.sede}</p>
                             <p className="text-xs text-muted-foreground">
-                              {progreso.realizadas} de {progreso.metaTotal} encuestas
+                              {progreso.realizadasMesActual} de {progreso.metaMensual} encuestas (mes actual)
                             </p>
                           </div>
                           <div className="flex items-center gap-4">
                             <div className="hidden sm:flex items-center gap-3 text-xs">
-                              <span className="text-emerald-600 font-medium">Completadas: {progreso.realizadas}</span>
-                              <span className="text-amber-600 font-medium">Pendientes: {progreso.pendientes}</span>
+                              <span className="text-emerald-600 font-medium">Completadas (año): {progreso.realizadas}</span>
+                              <span className="text-amber-600 font-medium">Pendientes (año): {progreso.pendientes}</span>
                             </div>
                             <div className="flex items-center gap-2">
                               <div className="w-24 h-2 overflow-hidden rounded-full bg-muted">
@@ -651,8 +671,8 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardP
                       </AccordionTrigger>
                       <AccordionContent className="px-4">
                         <div className="flex justify-between items-center mb-3 sm:hidden text-xs">
-                          <span className="text-emerald-600 font-medium">Completadas: {progreso.realizadas}</span>
-                          <span className="text-amber-600 font-medium">Pendientes: {progreso.pendientes}</span>
+                          <span className="text-emerald-600 font-medium">Completadas (año): {progreso.realizadas}</span>
+                          <span className="text-amber-600 font-medium">Pendientes (año): {progreso.pendientes}</span>
                         </div>
                         <div className="flex justify-end mb-3">
                           <Button
