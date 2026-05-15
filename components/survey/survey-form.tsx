@@ -399,7 +399,7 @@ export function SurveyForm() {
           Encuesta de Satisfacción del Usuario
         </h1>
         <p className="text-xs text-muted-foreground leading-relaxed max-w-xl mx-auto border border-border rounded-md px-4 py-3 bg-muted/40">
-          Los datos personales que usted proporcione en este formulario serán tratados por <strong>PHARMASAN SAS</strong> de acuerdo con la Ley 1581 de 2012 y su normatividad complementaria. PHARMASAN SAS garantiza la confidencialidad, seguridad y protección de sus datos personales.
+          Los datos personales que usted proporcione serán tratados por <strong>PHARMASAN SAS</strong> de acuerdo con la ley 1581 de 2012 y su normatividad complementaria. Se garantiza la confidencialidad, seguridad y protección de los datos personales.
         </p>
       </div>
 
