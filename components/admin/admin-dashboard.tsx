@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -46,6 +46,19 @@ import {
 } from "lucide-react"
 import { format, parseISO, startOfWeek, endOfWeek, differenceInWeeks, addWeeks, startOfMonth, endOfMonth, differenceInCalendarMonths } from "date-fns"
 import { es } from "date-fns/locale"
+
+/**
+ * Renders a timestamp string client-side only to avoid server/client timezone
+ * hydration mismatches. The server renders an empty string; the client fills
+ * it in after mount. suppressHydrationWarning suppresses the harmless diff.
+ */
+function ClientTimestamp({ iso, fmt = "dd/MM/yyyy HH:mm" }: { iso: string; fmt?: string }) {
+  const [text, setText] = useState("")
+  useEffect(() => {
+    setText(format(parseISO(iso), fmt, { locale: es }))
+  }, [iso, fmt])
+  return <span suppressHydrationWarning>{text}</span>
+}
 
 interface Encuesta {
   id: string
@@ -583,7 +596,7 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas, departamentos, mu
                             <TableCell>{getRatingBadge(encuesta.experiencia_global, 5)}</TableCell>
                             <TableCell>{getRatingBadge(encuesta.recomendaria_ips, 4)}</TableCell>
                             <TableCell className="text-right text-sm text-muted-foreground">
-                              {format(parseISO(encuesta.created_at), "dd/MM/yyyy HH:mm", { locale: es })}
+                              <ClientTimestamp iso={encuesta.created_at} />
                             </TableCell>
                           </TableRow>
                         ))}
