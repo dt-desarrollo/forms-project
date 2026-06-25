@@ -29,6 +29,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Empty, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
+import { AdminConfig } from "@/components/admin/admin-config"
 import { 
   ClipboardList, 
   Download, 
@@ -40,7 +41,8 @@ import {
   Star,
   ThumbsUp,
   Users,
-  Search
+  Search,
+  Settings
 } from "lucide-react"
 import { format, startOfWeek, endOfWeek, differenceInWeeks, addWeeks, startOfMonth, endOfMonth, differenceInCalendarMonths } from "date-fns"
 import { es } from "date-fns/locale"
@@ -85,10 +87,33 @@ interface SedeMeta {
   sedes: { nombre: string } | null
 }
 
+interface MunicipioConDepto {
+  id: number
+  nombre: string
+  departamento_id: number
+  departamentos: { nombre: string } | null
+}
+
+interface SedeCompleta {
+  id: number
+  nombre: string
+  municipio_id: number
+  activo: boolean
+  municipios: { nombre: string; departamento_id: number } | null
+}
+
+interface Departamento {
+  id: number
+  nombre: string
+}
+
 interface AdminDashboardProps {
   encuestas: Encuesta[]
   sedes: Sede[]
   sedesMetas: SedeMeta[]
+  departamentos: Departamento[]
+  municipios: MunicipioConDepto[]
+  sedesCompletas: SedeCompleta[]
 }
 
 const ITEMS_PER_PAGE = 10
@@ -114,7 +139,7 @@ function getTotalWeeks(startDate: Date, endDate: Date): number {
   return differenceInWeeks(endDate, startDate) + 1
 }
 
-export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardProps) {
+export function AdminDashboard({ encuestas, sedes, sedesMetas, departamentos, municipios, sedesCompletas }: AdminDashboardProps) {
   const [filtroFechaInicio, setFiltroFechaInicio] = useState("")
   const [filtroFechaFin, setFiltroFechaFin] = useState("")
   const [filtroSede, setFiltroSede] = useState<string>("all")
@@ -425,6 +450,10 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardP
         <TabsList>
           <TabsTrigger value="encuestas">Encuestas</TabsTrigger>
           <TabsTrigger value="metas">Metas por Sede</TabsTrigger>
+          <TabsTrigger value="configuracion">
+            <Settings data-icon="inline-start" />
+            Configuracion
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="encuestas" className="space-y-4">
@@ -750,6 +779,14 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardP
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="configuracion">
+          <AdminConfig
+            departamentos={departamentos}
+            municipios={municipios}
+            sedes={sedesCompletas}
+          />
         </TabsContent>
       </Tabs>
     </div>

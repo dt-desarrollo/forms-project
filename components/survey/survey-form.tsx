@@ -163,6 +163,7 @@ export function SurveyForm() {
         .from("sedes")
         .select("*")
         .eq("municipio_id", formData.municipio_id)
+        .eq("activo", true)
         .order("nombre")
       
       if (error) {

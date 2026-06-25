@@ -13,6 +13,7 @@ export interface Sede {
   id: number
   nombre: string
   municipio_id: number
+  activo: boolean
 }
 
 export interface Eps {
