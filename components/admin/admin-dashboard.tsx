@@ -44,7 +44,7 @@ import {
   Search,
   Settings
 } from "lucide-react"
-import { format, startOfWeek, endOfWeek, differenceInWeeks, addWeeks, startOfMonth, endOfMonth, differenceInCalendarMonths } from "date-fns"
+import { format, parseISO, startOfWeek, endOfWeek, differenceInWeeks, addWeeks, startOfMonth, endOfMonth, differenceInCalendarMonths } from "date-fns"
 import { es } from "date-fns/locale"
 
 interface Encuesta {
@@ -564,7 +564,7 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas, departamentos, mu
                         {paginatedEncuestas.map((encuesta) => (
                           <TableRow key={encuesta.id}>
                             <TableCell className="font-medium">
-                              {format(new Date(encuesta.fecha_atencion), "dd MMM yyyy", { locale: es })}
+                              {format(parseISO(encuesta.fecha_atencion), "dd MMM yyyy", { locale: es })}
                             </TableCell>
                             <TableCell>
                               <div className="flex flex-col">
@@ -583,7 +583,7 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas, departamentos, mu
                             <TableCell>{getRatingBadge(encuesta.experiencia_global, 5)}</TableCell>
                             <TableCell>{getRatingBadge(encuesta.recomendaria_ips, 4)}</TableCell>
                             <TableCell className="text-right text-sm text-muted-foreground">
-                              {format(new Date(encuesta.created_at), "dd/MM/yyyy HH:mm", { locale: es })}
+                              {format(parseISO(encuesta.created_at), "dd/MM/yyyy HH:mm", { locale: es })}
                             </TableCell>
                           </TableRow>
                         ))}
