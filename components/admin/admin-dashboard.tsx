@@ -786,6 +786,7 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas, departamentos, mu
             departamentos={departamentos}
             municipios={municipios}
             sedes={sedesCompletas}
+            sedesMetas={sedesMetas}
           />
         </TabsContent>
       </Tabs>

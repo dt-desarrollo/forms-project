@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useState, useTransition, useMemo } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -35,14 +35,23 @@ import {
 import { Empty, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
 import { Spinner } from "@/components/ui/spinner"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
-import { MapPin, Building2, Landmark, Plus, Pencil, Search } from "lucide-react"
+import { MapPin, Building2, Landmark, Plus, Pencil, Search, Target, CalendarDays, CheckCircle2, AlertCircle } from "lucide-react"
 import { toast } from "sonner"
 import type { Departamento, Municipio, Sede } from "@/lib/types"
+
+interface SedeMeta {
+  id: number
+  sede_id: number
+  meta_total: number
+  fecha_inicio: string
+  fecha_fin: string
+}
 
 interface AdminConfigProps {
   departamentos: Departamento[]
   municipios: MunicipioConDepto[]
   sedes: SedeCompleta[]
+  sedesMetas: SedeMeta[]
 }
 
 interface MunicipioConDepto extends Municipio {
@@ -691,9 +700,354 @@ function SedesTab({
   )
 }
 
+// ---- Metas ----
+
+interface MetaFormState {
+  sede_id: number
+  meta_total: string
+  fecha_inicio: string
+  fecha_fin: string
+}
+
+interface MetaDialogProps {
+  open: boolean
+  onClose: () => void
+  sede: SedeCompleta | null
+  existingMeta: SedeMeta | null
+  onSaved: (meta: SedeMeta) => void
+}
+
+function MetaDialog({ open, onClose, sede, existingMeta, onSaved }: MetaDialogProps) {
+  const supabase = createClient()
+  const [form, setForm] = useState<MetaFormState>({
+    sede_id: sede?.id ?? 0,
+    meta_total: existingMeta ? String(existingMeta.meta_total) : "",
+    fecha_inicio: existingMeta?.fecha_inicio ?? "",
+    fecha_fin: existingMeta?.fecha_fin ?? "",
+  })
+  const [isPending, startTransition] = useTransition()
+
+  // Sync form when props change
+  const isEditing = !!existingMeta
+
+  const handleChange = (field: keyof MetaFormState, value: string) => {
+    setForm((prev) => ({ ...prev, [field]: value }))
+  }
+
+  const isValid =
+    !!form.meta_total &&
+    !isNaN(Number(form.meta_total)) &&
+    Number(form.meta_total) >= 0 &&
+    !!form.fecha_inicio &&
+    !!form.fecha_fin &&
+    form.fecha_fin >= form.fecha_inicio
+
+  const handleSave = () => {
+    if (!isValid || !sede) return
+
+    startTransition(async () => {
+      const payload = {
+        sede_id: sede.id,
+        meta_total: Number(form.meta_total),
+        fecha_inicio: form.fecha_inicio,
+        fecha_fin: form.fecha_fin,
+      }
+
+      let result
+      if (isEditing && existingMeta) {
+        result = await supabase
+          .from("sedes_metas")
+          .update({ meta_total: payload.meta_total, fecha_inicio: payload.fecha_inicio, fecha_fin: payload.fecha_fin })
+          .eq("id", existingMeta.id)
+          .select()
+          .single()
+      } else {
+        result = await supabase
+          .from("sedes_metas")
+          .insert(payload)
+          .select()
+          .single()
+      }
+
+      if (result.error) {
+        toast.error("Error al guardar meta: " + result.error.message)
+        return
+      }
+
+      onSaved(result.data as SedeMeta)
+      toast.success(isEditing ? "Meta actualizada" : `Meta creada para "${sede.nombre}"`)
+      onClose()
+    })
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{isEditing ? "Editar meta" : "Crear meta"}</DialogTitle>
+          <DialogDescription>
+            {isEditing
+              ? `Actualiza la meta de encuestas para ${sede?.nombre ?? ""}.`
+              : `Define la meta de encuestas para ${sede?.nombre ?? ""}.`}
+          </DialogDescription>
+        </DialogHeader>
+        <FieldGroup>
+          <Field>
+            <FieldLabel htmlFor="meta-total">Meta total de encuestas</FieldLabel>
+            <Input
+              id="meta-total"
+              type="number"
+              min={0}
+              placeholder="Ej: 250"
+              value={form.meta_total}
+              onChange={(e) => handleChange("meta_total", e.target.value)}
+              autoFocus
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="meta-inicio">Fecha de inicio</FieldLabel>
+            <Input
+              id="meta-inicio"
+              type="date"
+              value={form.fecha_inicio}
+              onChange={(e) => handleChange("fecha_inicio", e.target.value)}
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="meta-fin">Fecha de fin</FieldLabel>
+            <Input
+              id="meta-fin"
+              type="date"
+              value={form.fecha_fin}
+              onChange={(e) => handleChange("fecha_fin", e.target.value)}
+            />
+          </Field>
+        </FieldGroup>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={isPending}>
+            Cancelar
+          </Button>
+          <Button onClick={handleSave} disabled={!isValid || isPending}>
+            {isPending && <Spinner className="mr-2 size-4" />}
+            {isEditing ? "Guardar cambios" : "Crear meta"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function MetasTab({
+  sedes,
+  sedesMetas: initialMetas,
+}: {
+  sedes: SedeCompleta[]
+  sedesMetas: SedeMeta[]
+}) {
+  const [metas, setMetas] = useState(initialMetas)
+  const [busqueda, setBusqueda] = useState("")
+  const [filtroEstado, setFiltroEstado] = useState<"all" | "con-meta" | "sin-meta">("all")
+  const [dialogSede, setDialogSede] = useState<SedeCompleta | null>(null)
+  const [dialogMeta, setDialogMeta] = useState<SedeMeta | null>(null)
+
+  const metasBySede = useMemo(() => {
+    const map = new Map<number, SedeMeta>()
+    metas.forEach((m) => map.set(m.sede_id, m))
+    return map
+  }, [metas])
+
+  const sedesFiltradas = useMemo(() => {
+    return sedes.filter((s) => {
+      const matchBusqueda = s.nombre.toLowerCase().includes(busqueda.toLowerCase())
+      const tieneMeta = metasBySede.has(s.id)
+      const matchEstado =
+        filtroEstado === "all" ||
+        (filtroEstado === "con-meta" && tieneMeta) ||
+        (filtroEstado === "sin-meta" && !tieneMeta)
+      return matchBusqueda && matchEstado
+    })
+  }, [sedes, busqueda, filtroEstado, metasBySede])
+
+  const conMeta = sedes.filter((s) => metasBySede.has(s.id)).length
+  const sinMeta = sedes.length - conMeta
+
+  const handleOpenDialog = (sede: SedeCompleta) => {
+    const meta = metasBySede.get(sede.id) ?? null
+    setDialogSede(sede)
+    setDialogMeta(meta)
+  }
+
+  const handleSaved = (meta: SedeMeta) => {
+    setMetas((prev) => {
+      const exists = prev.find((m) => m.id === meta.id)
+      if (exists) return prev.map((m) => (m.id === meta.id ? meta : m))
+      return [...prev, meta]
+    })
+    setDialogSede(null)
+    setDialogMeta(null)
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Summary cards */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <Card>
+          <CardContent className="flex items-center gap-3 pt-4 pb-4">
+            <div className="flex size-9 items-center justify-center rounded-full bg-primary/10">
+              <Target className="size-4 text-primary" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Total sedes</p>
+              <p className="text-xl font-bold">{sedes.length}</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="flex items-center gap-3 pt-4 pb-4">
+            <div className="flex size-9 items-center justify-center rounded-full bg-emerald-500/10">
+              <CheckCircle2 className="size-4 text-emerald-600" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Con meta</p>
+              <p className="text-xl font-bold text-emerald-600">{conMeta}</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="flex items-center gap-3 pt-4 pb-4">
+            <div className="flex size-9 items-center justify-center rounded-full bg-amber-500/10">
+              <AlertCircle className="size-4 text-amber-600" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Sin meta</p>
+              <p className="text-xl font-bold text-amber-600">{sinMeta}</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Metas por sede ({sedesFiltradas.length})</CardTitle>
+          <CardDescription>
+            Crea o edita la meta anual de encuestas para cada sede.
+          </CardDescription>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Buscar sede..."
+                value={busqueda}
+                onChange={(e) => setBusqueda(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            <Select
+              value={filtroEstado}
+              onValueChange={(v) => setFiltroEstado(v as typeof filtroEstado)}
+            >
+              <SelectTrigger className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas</SelectItem>
+                <SelectItem value="con-meta">Con meta</SelectItem>
+                <SelectItem value="sin-meta">Sin meta</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {sedesFiltradas.length === 0 ? (
+            <Empty>
+              <EmptyMedia variant="icon"><Target className="size-5" /></EmptyMedia>
+              <EmptyTitle>Sin resultados</EmptyTitle>
+              <EmptyDescription>No se encontraron sedes.</EmptyDescription>
+            </Empty>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Sede</TableHead>
+                  <TableHead className="hidden sm:table-cell">Municipio</TableHead>
+                  <TableHead className="text-center">Meta</TableHead>
+                  <TableHead className="hidden md:table-cell text-center">Periodo</TableHead>
+                  <TableHead className="text-right">Accion</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sedesFiltradas.map((sede) => {
+                  const meta = metasBySede.get(sede.id)
+                  return (
+                    <TableRow key={sede.id}>
+                      <TableCell>
+                        <div className="flex flex-col gap-0.5">
+                          <span className="font-medium">{sede.nombre}</span>
+                          <span className="text-xs text-muted-foreground sm:hidden">
+                            {sede.municipios?.nombre ?? "—"}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="hidden sm:table-cell text-sm text-muted-foreground">
+                        {sede.municipios?.nombre ?? "—"}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {meta ? (
+                          <Badge variant="default" className="bg-emerald-600 tabular-nums">
+                            {meta.meta_total.toLocaleString()}
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="text-amber-700 bg-amber-100">
+                            Sin meta
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell text-center text-sm text-muted-foreground">
+                        {meta ? (
+                          <span className="flex items-center justify-center gap-1">
+                            <CalendarDays className="size-3" />
+                            {meta.fecha_inicio} → {meta.fecha_fin}
+                          </span>
+                        ) : (
+                          "—"
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant={meta ? "outline" : "default"}
+                          size="sm"
+                          onClick={() => handleOpenDialog(sede)}
+                        >
+                          {meta ? (
+                            <><Pencil data-icon="inline-start" />Editar</>
+                          ) : (
+                            <><Plus data-icon="inline-start" />Crear</>
+                          )}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      <MetaDialog
+        open={!!dialogSede}
+        onClose={() => { setDialogSede(null); setDialogMeta(null) }}
+        sede={dialogSede}
+        existingMeta={dialogMeta}
+        onSaved={handleSaved}
+      />
+    </div>
+  )
+}
+
 // ---- Main component ----
 
-export function AdminConfig({ departamentos, municipios, sedes }: AdminConfigProps) {
+export function AdminConfig({ departamentos, municipios, sedes, sedesMetas }: AdminConfigProps) {
   return (
     <div className="space-y-4">
       <div>
@@ -718,6 +1072,10 @@ export function AdminConfig({ departamentos, municipios, sedes }: AdminConfigPro
             <Building2 data-icon="inline-start" />
             Sedes
           </TabsTrigger>
+          <TabsTrigger value="metas">
+            <Target data-icon="inline-start" />
+            Metas
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="departamentos">
@@ -728,6 +1086,9 @@ export function AdminConfig({ departamentos, municipios, sedes }: AdminConfigPro
         </TabsContent>
         <TabsContent value="sedes">
           <SedesTab sedes={sedes} municipios={municipios} departamentos={departamentos} />
+        </TabsContent>
+        <TabsContent value="metas">
+          <MetasTab sedes={sedes} sedesMetas={sedesMetas} />
         </TabsContent>
       </Tabs>
     </div>
