@@ -77,9 +77,9 @@ function DepartamentosTab({ departamentos: initialDeps }: { departamentos: Depar
   )
 
   const handleCrear = () => {
-    const nombre = nuevoNombre.trim().toUpperCase()
+    const nombre = nuevoNombre.trim()
     if (!nombre) return
-    if (departamentos.some((d) => d.nombre.toUpperCase() === nombre)) {
+    if (departamentos.some((d) => d.nombre.toLowerCase() === nombre.toLowerCase())) {
       toast.error("Ya existe un departamento con ese nombre")
       return
     }
@@ -117,11 +117,10 @@ function DepartamentosTab({ departamentos: initialDeps }: { departamentos: Depar
               <div className="flex gap-2">
                 <Input
                   id="nuevo-dep"
-                  placeholder="Ej: SANTANDER"
+                  placeholder="Ej: Santander"
                   value={nuevoNombre}
                   onChange={(e) => setNuevoNombre(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleCrear()}
-                  className="uppercase"
                 />
                 <Button onClick={handleCrear} disabled={!nuevoNombre.trim() || isPending}>
                   {isPending ? <Spinner className="mr-2 size-4" /> : <Plus data-icon="inline-start" />}
@@ -182,14 +181,15 @@ function DepartamentosTab({ departamentos: initialDeps }: { departamentos: Depar
 // ---- Municipios ----
 
 function MunicipiosTab({
-  municipios: initialMunis,
+  municipios,
   departamentos,
+  onMunicipioCreado,
 }: {
   municipios: MunicipioConDepto[]
   departamentos: Departamento[]
+  onMunicipioCreado: (nuevo: MunicipioConDepto) => void
 }) {
   const supabase = createClient()
-  const [municipios, setMunicipios] = useState(initialMunis)
   const [nuevoNombre, setNuevoNombre] = useState("")
   const [deptoSeleccionado, setDeptoSeleccionado] = useState<string>("")
   const [busqueda, setBusqueda] = useState("")
@@ -203,11 +203,11 @@ function MunicipiosTab({
   })
 
   const handleCrear = () => {
-    const nombre = nuevoNombre.trim().toUpperCase()
+    const nombre = nuevoNombre.trim()
     if (!nombre || !deptoSeleccionado) return
 
     const deptoId = parseInt(deptoSeleccionado)
-    if (municipios.some((m) => m.nombre.toUpperCase() === nombre && m.departamento_id === deptoId)) {
+    if (municipios.some((m) => m.nombre.toLowerCase() === nombre.toLowerCase() && m.departamento_id === deptoId)) {
       toast.error("Ya existe un municipio con ese nombre en ese departamento")
       return
     }
@@ -229,10 +229,9 @@ function MunicipiosTab({
         ...data,
         departamentos: { nombre: deptoNombre },
       }
-      setMunicipios((prev) =>
-        [...prev, newMuni].sort((a, b) => a.nombre.localeCompare(b.nombre))
-      )
+      onMunicipioCreado(newMuni)
       setNuevoNombre("")
+      setDeptoSeleccionado("")
       toast.success(`Municipio "${nombre}" creado`)
     })
   }
@@ -268,11 +267,10 @@ function MunicipiosTab({
               <div className="flex gap-2">
                 <Input
                   id="nuevo-muni"
-                  placeholder="Ej: BUCARAMANGA"
+                  placeholder="Ej: Bucaramanga"
                   value={nuevoNombre}
                   onChange={(e) => setNuevoNombre(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleCrear()}
-                  className="uppercase"
                 />
                 <Button
                   onClick={handleCrear}
@@ -370,7 +368,7 @@ function EditSedeDialog({ sede, open, onClose, onSaved }: EditSedeDialogProps) {
   })
 
   const handleSave = () => {
-    const nombreTrimmed = nombre.trim().toUpperCase()
+    const nombreTrimmed = nombre.trim()
     if (!nombreTrimmed || !sede) return
 
     startTransition(async () => {
@@ -406,7 +404,6 @@ function EditSedeDialog({ sede, open, onClose, onSaved }: EditSedeDialogProps) {
               value={nombre}
               onChange={(e) => setNombre(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSave()}
-              className="uppercase"
               autoFocus
             />
           </Field>
@@ -458,11 +455,11 @@ function SedesTab({
   })
 
   const handleCrear = () => {
-    const nombre = nuevoNombre.trim().toUpperCase()
+    const nombre = nuevoNombre.trim()
     if (!nombre || !muniSeleccionado) return
 
     const muniId = parseInt(muniSeleccionado)
-    if (sedes.some((s) => s.nombre.toUpperCase() === nombre && s.municipio_id === muniId)) {
+    if (sedes.some((s) => s.nombre.toLowerCase() === nombre.toLowerCase() && s.municipio_id === muniId)) {
       toast.error("Ya existe una sede con ese nombre en ese municipio")
       return
     }
@@ -575,11 +572,10 @@ function SedesTab({
               <div className="flex gap-2">
                 <Input
                   id="nuevo-sede"
-                  placeholder="Ej: BUCARAMANGA NORTE"
+                  placeholder="Ej: Bucaramanga Norte"
                   value={nuevoNombre}
                   onChange={(e) => setNuevoNombre(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleCrear()}
-                  className="uppercase"
                 />
                 <Button
                   onClick={handleCrear}
@@ -1047,7 +1043,18 @@ function MetasTab({
 
 // ---- Main component ----
 
-export function AdminConfig({ departamentos, municipios, sedes, sedesMetas }: AdminConfigProps) {
+export function AdminConfig({ departamentos, municipios: initialMunicipios, sedes, sedesMetas }: AdminConfigProps) {
+  // Elevate municipios state here so MunicipiosTab and SedesTab share the same list.
+  // When a new municipio is created in MunicipiosTab it becomes immediately available
+  // in SedesTab's selector without a page reload.
+  const [municipios, setMunicipios] = useState(initialMunicipios)
+
+  const handleMunicipioCreado = (nuevo: MunicipioConDepto) => {
+    setMunicipios((prev) =>
+      [...prev, nuevo].sort((a, b) => a.nombre.localeCompare(b.nombre))
+    )
+  }
+
   return (
     <div className="space-y-4">
       <div>
@@ -1082,7 +1089,11 @@ export function AdminConfig({ departamentos, municipios, sedes, sedesMetas }: Ad
           <DepartamentosTab departamentos={departamentos} />
         </TabsContent>
         <TabsContent value="municipios">
-          <MunicipiosTab municipios={municipios} departamentos={departamentos} />
+          <MunicipiosTab
+            municipios={municipios}
+            departamentos={departamentos}
+            onMunicipioCreado={handleMunicipioCreado}
+          />
         </TabsContent>
         <TabsContent value="sedes">
           <SedesTab sedes={sedes} municipios={municipios} departamentos={departamentos} />
