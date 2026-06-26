@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -29,6 +29,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Empty, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
+import { AdminConfig } from "@/components/admin/admin-config"
 import { 
   ClipboardList, 
   Download, 
@@ -40,10 +41,24 @@ import {
   Star,
   ThumbsUp,
   Users,
-  Search
+  Search,
+  Settings
 } from "lucide-react"
-import { format, startOfWeek, endOfWeek, differenceInWeeks, addWeeks, startOfMonth, endOfMonth, differenceInCalendarMonths } from "date-fns"
+import { format, parseISO, startOfWeek, endOfWeek, differenceInWeeks, addWeeks, startOfMonth, endOfMonth, differenceInCalendarMonths } from "date-fns"
 import { es } from "date-fns/locale"
+
+/**
+ * Renders a timestamp string client-side only to avoid server/client timezone
+ * hydration mismatches. The server renders an empty string; the client fills
+ * it in after mount. suppressHydrationWarning suppresses the harmless diff.
+ */
+function ClientTimestamp({ iso, fmt = "dd/MM/yyyy HH:mm" }: { iso: string; fmt?: string }) {
+  const [text, setText] = useState("")
+  useEffect(() => {
+    setText(format(parseISO(iso), fmt, { locale: es }))
+  }, [iso, fmt])
+  return <span suppressHydrationWarning>{text}</span>
+}
 
 interface Encuesta {
   id: string
@@ -85,10 +100,33 @@ interface SedeMeta {
   sedes: { nombre: string } | null
 }
 
+interface MunicipioConDepto {
+  id: number
+  nombre: string
+  departamento_id: number
+  departamentos: { nombre: string } | null
+}
+
+interface SedeCompleta {
+  id: number
+  nombre: string
+  municipio_id: number
+  activo: boolean
+  municipios: { nombre: string; departamento_id: number } | null
+}
+
+interface Departamento {
+  id: number
+  nombre: string
+}
+
 interface AdminDashboardProps {
   encuestas: Encuesta[]
   sedes: Sede[]
   sedesMetas: SedeMeta[]
+  departamentos: Departamento[]
+  municipios: MunicipioConDepto[]
+  sedesCompletas: SedeCompleta[]
 }
 
 const ITEMS_PER_PAGE = 10
@@ -114,7 +152,7 @@ function getTotalWeeks(startDate: Date, endDate: Date): number {
   return differenceInWeeks(endDate, startDate) + 1
 }
 
-export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardProps) {
+export function AdminDashboard({ encuestas, sedes, sedesMetas, departamentos, municipios, sedesCompletas }: AdminDashboardProps) {
   const [filtroFechaInicio, setFiltroFechaInicio] = useState("")
   const [filtroFechaFin, setFiltroFechaFin] = useState("")
   const [filtroSede, setFiltroSede] = useState<string>("all")
@@ -425,6 +463,10 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardP
         <TabsList>
           <TabsTrigger value="encuestas">Encuestas</TabsTrigger>
           <TabsTrigger value="metas">Metas por Sede</TabsTrigger>
+          <TabsTrigger value="configuracion">
+            <Settings data-icon="inline-start" />
+            Configuracion
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="encuestas" className="space-y-4">
@@ -535,7 +577,7 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardP
                         {paginatedEncuestas.map((encuesta) => (
                           <TableRow key={encuesta.id}>
                             <TableCell className="font-medium">
-                              {format(new Date(encuesta.fecha_atencion), "dd MMM yyyy", { locale: es })}
+                              {format(parseISO(encuesta.fecha_atencion), "dd MMM yyyy", { locale: es })}
                             </TableCell>
                             <TableCell>
                               <div className="flex flex-col">
@@ -554,7 +596,7 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardP
                             <TableCell>{getRatingBadge(encuesta.experiencia_global, 5)}</TableCell>
                             <TableCell>{getRatingBadge(encuesta.recomendaria_ips, 4)}</TableCell>
                             <TableCell className="text-right text-sm text-muted-foreground">
-                              {format(new Date(encuesta.created_at), "dd/MM/yyyy HH:mm", { locale: es })}
+                              <ClientTimestamp iso={encuesta.created_at} />
                             </TableCell>
                           </TableRow>
                         ))}
@@ -750,6 +792,15 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas }: AdminDashboardP
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="configuracion">
+          <AdminConfig
+            departamentos={departamentos}
+            municipios={municipios}
+            sedes={sedesCompletas}
+            sedesMetas={sedesMetas}
+          />
         </TabsContent>
       </Tabs>
     </div>

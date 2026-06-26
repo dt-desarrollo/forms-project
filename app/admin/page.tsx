@@ -46,7 +46,7 @@ export default async function AdminPage() {
     console.error("Error fetching surveys:", encuestasError)
   }
 
-  // Obtener lista de sedes
+  // Obtener lista de sedes (para filtro de encuestas)
   const { data: sedes, error: sedesError } = await supabase
     .from("sedes")
     .select("id, nombre")
@@ -67,6 +67,22 @@ export default async function AdminPage() {
   if (metasError) {
     console.error("Error fetching metas:", metasError)
   }
+
+  // Datos para pestaña de Configuracion
+  const { data: departamentos } = await supabase
+    .from("departamentos")
+    .select("id, nombre")
+    .order("nombre")
+
+  const { data: municipios } = await supabase
+    .from("municipios")
+    .select("id, nombre, departamento_id, departamentos(nombre)")
+    .order("nombre")
+
+  const { data: sedesCompletas } = await supabase
+    .from("sedes")
+    .select("id, nombre, municipio_id, activo, municipios(nombre, departamento_id)")
+    .order("nombre")
 
   return (
     <main className="min-h-screen bg-muted/30 p-4 md:p-8">
@@ -95,6 +111,9 @@ export default async function AdminPage() {
           encuestas={encuestas || []} 
           sedes={sedes || []}
           sedesMetas={sedesMetas || []}
+          departamentos={departamentos || []}
+          municipios={(municipios || []) as any}
+          sedesCompletas={(sedesCompletas || []) as any}
         />
       </div>
     </main>
