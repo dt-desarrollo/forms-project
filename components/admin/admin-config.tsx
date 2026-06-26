@@ -97,7 +97,7 @@ function DepartamentosTab({ departamentos: initialDeps }: { departamentos: Depar
       }
       setDepartamentos((prev) => [...prev, data].sort((a, b) => a.nombre.localeCompare(b.nombre)))
       setNuevoNombre("")
-      toast.success(`Departamento "${nombre}" creado`)
+      toast.success(`Departamento "${nombre}" creado exitosamente`)
     })
   }
 
@@ -232,7 +232,7 @@ function MunicipiosTab({
       onMunicipioCreado(newMuni)
       setNuevoNombre("")
       setDeptoSeleccionado("")
-      toast.success(`Municipio "${nombre}" creado`)
+      toast.success(`Municipio "${nombre}" creado exitosamente`)
     })
   }
 
@@ -426,10 +426,12 @@ function SedesTab({
   sedes: initialSedes,
   municipios,
   departamentos,
+  onSedeCreada,
 }: {
   sedes: SedeCompleta[]
   municipios: MunicipioConDepto[]
   departamentos: Departamento[]
+  onSedeCreada: (nueva: SedeCompleta) => void
 }) {
   const supabase = createClient()
   const [sedes, setSedes] = useState(initialSedes)
@@ -484,8 +486,11 @@ function SedesTab({
           : null,
       }
       setSedes((prev) => [...prev, newSede].sort((a, b) => a.nombre.localeCompare(b.nombre)))
+      onSedeCreada(newSede)
       setNuevoNombre("")
-      toast.success(`Sede "${nombre}" creada`)
+      setMuniSeleccionado("")
+      setDeptoFiltroCrear("")
+      toast.success(`Sede "${nombre}" creada exitosamente`)
     })
   }
 
@@ -1043,15 +1048,21 @@ function MetasTab({
 
 // ---- Main component ----
 
-export function AdminConfig({ departamentos, municipios: initialMunicipios, sedes, sedesMetas }: AdminConfigProps) {
-  // Elevate municipios state here so MunicipiosTab and SedesTab share the same list.
-  // When a new municipio is created in MunicipiosTab it becomes immediately available
-  // in SedesTab's selector without a page reload.
+export function AdminConfig({ departamentos, municipios: initialMunicipios, sedes: initialSedes, sedesMetas }: AdminConfigProps) {
+  // Elevate municipios state so MunicipiosTab and SedesTab share the same list.
   const [municipios, setMunicipios] = useState(initialMunicipios)
+  // Elevate sedes state so SedesTab and MetasTab share the same list.
+  const [sedes, setSedes] = useState(initialSedes)
 
   const handleMunicipioCreado = (nuevo: MunicipioConDepto) => {
     setMunicipios((prev) =>
       [...prev, nuevo].sort((a, b) => a.nombre.localeCompare(b.nombre))
+    )
+  }
+
+  const handleSedeCreada = (nueva: SedeCompleta) => {
+    setSedes((prev) =>
+      [...prev, nueva].sort((a, b) => a.nombre.localeCompare(b.nombre))
     )
   }
 
@@ -1096,7 +1107,12 @@ export function AdminConfig({ departamentos, municipios: initialMunicipios, sede
           />
         </TabsContent>
         <TabsContent value="sedes">
-          <SedesTab sedes={sedes} municipios={municipios} departamentos={departamentos} />
+          <SedesTab
+            sedes={sedes}
+            municipios={municipios}
+            departamentos={departamentos}
+            onSedeCreada={handleSedeCreada}
+          />
         </TabsContent>
         <TabsContent value="metas">
           <MetasTab sedes={sedes} sedesMetas={sedesMetas} />
