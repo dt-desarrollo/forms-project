@@ -693,7 +693,7 @@ export function SurveyForm() {
         <SectionHeader
           number={6}
           title="TRAZADORAS"
-          description="Califique su experiencia general con los servicios de salud"
+          description="Califique del 1 al 4: 4. Excelente 3. Bueno 2. Regular 1. Malo"
         />
         <CardContent className="space-y-4 p-4">
           <RatingQuestion
