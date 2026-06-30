@@ -75,6 +75,7 @@ export async function fetchEncuestasPage(
       `*, departamentos(nombre), municipios(nombre), sedes(nombre), eps(nombre), tipos_afiliado(nombre)`,
       { count: "exact" }
     )
+    .order("fecha_atencion", { ascending: false })
     .order("created_at", { ascending: false })
     .range(from, to)
 
@@ -175,6 +176,7 @@ export async function fetchAllEncuestasForExport(
       .select(
         `*, departamentos(nombre), municipios(nombre), sedes(nombre), eps(nombre), tipos_afiliado(nombre)`
       )
+      .order("fecha_atencion", { ascending: false })
       .order("created_at", { ascending: false })
       .range(pageNum * PAGE_SIZE, (pageNum + 1) * PAGE_SIZE - 1)
 
