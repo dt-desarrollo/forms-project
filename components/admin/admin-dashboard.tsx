@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useEffect } from "react"
+import { useState, useMemo, useEffect, useTransition, useCallback } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -30,22 +30,30 @@ import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Empty, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
 import { AdminConfig } from "@/components/admin/admin-config"
-import { 
-  ClipboardList, 
-  Download, 
-  Filter, 
-  ChevronLeft, 
+import {
+  ClipboardList,
+  Download,
+  Filter,
+  ChevronLeft,
   ChevronRight,
   Target,
-  TrendingUp,
   Star,
   ThumbsUp,
   Users,
   Search,
-  Settings
+  Settings,
+  Loader2,
 } from "lucide-react"
-import { format, parseISO, startOfWeek, endOfWeek, differenceInWeeks, addWeeks, startOfMonth, endOfMonth, differenceInCalendarMonths } from "date-fns"
+import { format, parseISO, startOfWeek, endOfWeek, differenceInWeeks, addWeeks, startOfMonth, endOfMonth, differenceInCalendarMonths, addMonths, subMonths } from "date-fns"
 import { es } from "date-fns/locale"
+import {
+  fetchEncuestasPage,
+  fetchEncuestasStats,
+  fetchAllEncuestasForExport,
+  type EncuestaFilters,
+  type StatsResult,
+  type EncuestaRow,
+} from "@/app/admin/actions"
 
 /**
  * Renders a timestamp string client-side only to avoid server/client timezone
@@ -60,31 +68,8 @@ function ClientTimestamp({ iso, fmt = "dd/MM/yyyy HH:mm" }: { iso: string; fmt?:
   return <span suppressHydrationWarning>{text}</span>
 }
 
-interface Encuesta {
-  id: string
-  fecha_atencion: string
-  eps_id: number | null
-  tipo_afiliado_id: number | null
-  experiencia_global: number
-  recomendaria_ips: number
-  atencion_personal: number
-  claridad_informacion: number
-  servicio_humanizado: number
-  recomendaciones_uso_seguro: number
-  medicamentos_oportunos: number
-  localizacion_acceso: number
-  horario_atencion: number
-  tiempo_solicitar_medicamentos: number
-  comodidad_limpieza: number
-  comentarios: string | null
-  created_at: string
-  sede_id: number
-  departamentos: { nombre: string } | null
-  municipios: { nombre: string } | null
-  sedes: { nombre: string } | null
-  eps: { nombre: string } | null
-  tipos_afiliado: { nombre: string } | null
-}
+// Re-export EncuestaRow as Encuesta for internal use
+type Encuesta = EncuestaRow
 
 interface Sede {
   id: number
@@ -121,7 +106,11 @@ interface Departamento {
 }
 
 interface AdminDashboardProps {
-  encuestas: Encuesta[]
+  initialEncuestas: Encuesta[]
+  initialTotal: number
+  initialStats: StatsResult
+  /** Minimal records (sede_id + created_at) for all encuestas — used by the Metas tab */
+  sedeEncuestasData: { sede_id: number; created_at: string }[]
   sedes: Sede[]
   sedesMetas: SedeMeta[]
   departamentos: Departamento[]
@@ -144,88 +133,117 @@ function getRatingBadge(value: number, max: number = 4) {
   }
 }
 
-function getWeekNumber(date: Date, startDate: Date): number {
-  return differenceInWeeks(date, startDate) + 1
-}
-
 function getTotalWeeks(startDate: Date, endDate: Date): number {
   return differenceInWeeks(endDate, startDate) + 1
 }
 
-export function AdminDashboard({ encuestas, sedes, sedesMetas, departamentos, municipios, sedesCompletas }: AdminDashboardProps) {
+export function AdminDashboard({
+  initialEncuestas,
+  initialTotal,
+  initialStats,
+  sedeEncuestasData,
+  sedes,
+  sedesMetas,
+  departamentos,
+  municipios,
+  sedesCompletas,
+}: AdminDashboardProps) {
   const [filtroFechaInicio, setFiltroFechaInicio] = useState("")
   const [filtroFechaFin, setFiltroFechaFin] = useState("")
   const [filtroSede, setFiltroSede] = useState<string>("all")
   const [currentPage, setCurrentPage] = useState(1)
   const [busquedaSede, setBusquedaSede] = useState("")
+  const [dateRangeError, setDateRangeError] = useState<string | null>(null)
 
-  // Filtrar encuestas
-  const encuestasFiltradas = useMemo(() => {
-    return encuestas.filter((enc) => {
-      const fechaEnc = new Date(enc.fecha_atencion)
-      
-      if (filtroFechaInicio && fechaEnc < new Date(filtroFechaInicio)) {
-        return false
-      }
-      if (filtroFechaFin && fechaEnc > new Date(filtroFechaFin)) {
-        return false
-      }
-      if (filtroSede !== "all" && enc.sede_id !== parseInt(filtroSede)) {
-        return false
-      }
-      return true
+  // Server-driven state
+  const [encuestasPage, setEncuestasPage] = useState<Encuesta[]>(initialEncuestas)
+  const [totalCount, setTotalCount] = useState(initialTotal)
+  const [stats, setStats] = useState<StatsResult>(initialStats)
+
+  // Transition states
+  const [isTablePending, startTableTransition] = useTransition()
+  const [isStatsPending, startStatsTransition] = useTransition()
+  const [isExporting, setIsExporting] = useState(false)
+
+  const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE)
+
+  const currentFilters = useCallback((): EncuestaFilters => ({
+    fechaInicio: filtroFechaInicio || undefined,
+    fechaFin: filtroFechaFin || undefined,
+    sedeId: filtroSede !== "all" ? parseInt(filtroSede) : undefined,
+  }), [filtroFechaInicio, filtroFechaFin, filtroSede])
+
+  /** Fetch a specific page without refreshing stats */
+  const loadPage = useCallback((page: number, filters: EncuestaFilters) => {
+    startTableTransition(async () => {
+      const result = await fetchEncuestasPage(filters, page, ITEMS_PER_PAGE)
+      setEncuestasPage(result.data)
+      setTotalCount(result.count)
+      setCurrentPage(page)
     })
-  }, [encuestas, filtroFechaInicio, filtroFechaFin, filtroSede])
+  }, [])
 
-  // Paginación
-  const totalPages = Math.ceil(encuestasFiltradas.length / ITEMS_PER_PAGE)
-  const paginatedEncuestas = encuestasFiltradas.slice(
-    (currentPage - 1) * ITEMS_PER_PAGE,
-    currentPage * ITEMS_PER_PAGE
-  )
+  /** Fetch new page + new stats when filters change */
+  const applyFilters = useCallback((filters: EncuestaFilters) => {
+    startTableTransition(async () => {
+      const result = await fetchEncuestasPage(filters, 1, ITEMS_PER_PAGE)
+      setEncuestasPage(result.data)
+      setTotalCount(result.count)
+      setCurrentPage(1)
+    })
+    startStatsTransition(async () => {
+      const newStats = await fetchEncuestasStats(filters)
+      setStats(newStats)
+    })
+  }, [])
 
-  // Calcular estadísticas
-  const stats = useMemo(() => {
-    const total = encuestasFiltradas.length
-    if (total === 0) {
-      return {
-        total: 0,
-        promedioExperiencia: "0.00",
-        promedioRecomendacion: "0.00",
-        promedioAtencion: "0.00",
+  // Re-fetch when filters change — but block if the date range exceeds 3 months
+  useEffect(() => {
+    if (filtroFechaInicio && filtroFechaFin) {
+      const inicio = new Date(filtroFechaInicio)
+      const fin = new Date(filtroFechaFin)
+
+      if (fin < inicio) {
+        setDateRangeError("La fecha fin no puede ser anterior a la fecha inicio.")
+        return
+      }
+
+      const maxFin = addMonths(inicio, 3)
+      if (fin > maxFin) {
+        setDateRangeError("El rango de fechas no puede superar los 3 meses.")
+        return
       }
     }
 
-    const calcPromedio = (campo: keyof Encuesta) => {
-      const suma = encuestasFiltradas.reduce((acc, enc) => acc + ((enc[campo] as number) || 0), 0)
-      return (suma / total).toFixed(2)
-    }
+    setDateRangeError(null)
+    applyFilters(currentFilters())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtroFechaInicio, filtroFechaFin, filtroSede])
 
-    return {
-      total,
-      promedioExperiencia: calcPromedio("experiencia_global"),
-      promedioRecomendacion: calcPromedio("recomendaria_ips"),
-      promedioAtencion: calcPromedio("atencion_personal"),
-    }
-  }, [encuestasFiltradas])
+  const handlePageChange = (page: number) => {
+    loadPage(page, currentFilters())
+  }
 
-  // Calcular progreso por sede
+  const limpiarFiltros = () => {
+    setFiltroFechaInicio("")
+    setFiltroFechaFin("")
+    setFiltroSede("all")
+    setDateRangeError(null)
+  }
+
+  // Calcular progreso por sede usando sedeEncuestasData (todos los registros, sin límite)
   const progresoSedes = useMemo(() => {
     const hoy = new Date()
 
     return sedesMetas.map((meta) => {
-      const encuestasSede = encuestas.filter((enc) => enc.sede_id === meta.sede_id)
+      const encuestasSede = sedeEncuestasData.filter((enc) => enc.sede_id === meta.sede_id)
 
-      // meta_total ya es la meta MENSUAL
       const metaMensual = meta.meta_total
-
-      // Meta anual = meta mensual × número de meses del periodo
       const fechaInicio = new Date(meta.fecha_inicio)
       const fechaFin = new Date(meta.fecha_fin)
       const totalMeses = differenceInCalendarMonths(fechaFin, fechaInicio) + 1
       const metaAnual = metaMensual * totalMeses
 
-      // Encuestas realizadas en el mes actual
       const inicioMesActual = startOfMonth(hoy)
       const finMesActual = endOfMonth(hoy)
       const realizadasMesActual = encuestasSede.filter((enc) => {
@@ -233,19 +251,14 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas, departamentos, mu
         return fecha >= inicioMesActual && fecha <= finMesActual
       }).length
 
-      // Totales anuales
       const totalRealizadasAnual = encuestasSede.length
       const pendientesAnual = Math.max(0, metaAnual - totalRealizadasAnual)
-
-      // Porcentaje sobre la meta mensual
       const porcentajeMensual = metaMensual > 0 ? (realizadasMesActual / metaMensual) * 100 : 0
 
-      // Meta semanal derivada de la meta mensual (≈ 4.33 semanas/mes)
       const totalSemanas = getTotalWeeks(fechaInicio, fechaFin)
       const semanasPorMes = totalMeses > 0 ? totalSemanas / totalMeses : 1
       const metaSemanal = Math.ceil(metaMensual / semanasPorMes)
 
-      // Calcular progreso por semana (lunes a domingo)
       const semanas: { semana: number; realizadas: number; meta: number; fechaInicio: Date; fechaFin: Date }[] = []
       const primerLunes = startOfWeek(fechaInicio, { weekStartsOn: 1 })
       for (let i = 0; i < totalSemanas; i++) {
@@ -267,82 +280,88 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas, departamentos, mu
       return {
         sede: meta.sedes?.nombre || "Desconocida",
         sedeId: meta.sede_id,
-        metaTotal: metaAnual,                    // meta anual calculada
-        metaMensual,                              // meta mensual (valor directo de BD)
-        realizadasMesActual,                      // encuestas en el mes actual
-        realizadas: totalRealizadasAnual,         // total anual acumulado
-        pendientes: pendientesAnual,              // pendientes para completar la meta anual
-        porcentaje: porcentajeMensual.toFixed(1), // % sobre la meta mensual
+        metaTotal: metaAnual,
+        metaMensual,
+        realizadasMesActual,
+        realizadas: totalRealizadasAnual,
+        pendientes: pendientesAnual,
+        porcentaje: porcentajeMensual.toFixed(1),
         semanas,
       }
     })
-  }, [encuestas, sedesMetas])
+  }, [sedeEncuestasData, sedesMetas])
 
-  // Filtrar progreso de sedes por búsqueda
   const progresoSedesFiltradas = useMemo(() => {
     if (!busquedaSede.trim()) return progresoSedes
     const termino = busquedaSede.toLowerCase().trim()
     return progresoSedes.filter((p) => p.sede.toLowerCase().includes(termino))
   }, [progresoSedes, busquedaSede])
 
-  // Exportar a Excel
-  const exportarExcel = () => {
-    const headers = [
-      "ID",
-      "Fecha Atención",
-      "Departamento",
-      "Municipio",
-      "Sede",
-      "EPS",
-      "Tipo Afiliado",
-      "Atención Personal",
-      "Claridad Información",
-      "Servicio Humanizado",
-      "Recomendaciones Uso Seguro",
-      "Medicamentos Oportunos",
-      "Localización Acceso",
-      "Horario Atención",
-      "Tiempo Solicitar Medicamentos",
-      "Comodidad Limpieza",
-      "Experiencia Global",
-      "Recomendaría IPS",
-      "Comentarios",
-      "Fecha Registro",
-    ]
+  // Exportar a CSV — fetches ALL records from server
+  const exportarExcel = async () => {
+    setIsExporting(true)
+    try {
+      const allEncuestas = await fetchAllEncuestasForExport(currentFilters())
 
-    const rows = encuestasFiltradas.map((enc) => [
-      enc.id,
-      enc.fecha_atencion,
-      enc.departamentos?.nombre || "",
-      enc.municipios?.nombre || "",
-      enc.sedes?.nombre || "",
-      enc.eps?.nombre || "",
-      enc.tipos_afiliado?.nombre || "",
-      enc.atencion_personal || "",
-      enc.claridad_informacion || "",
-      enc.servicio_humanizado || "",
-      enc.recomendaciones_uso_seguro || "",
-      enc.medicamentos_oportunos || "",
-      enc.localizacion_acceso || "",
-      enc.horario_atencion || "",
-      enc.tiempo_solicitar_medicamentos || "",
-      enc.comodidad_limpieza || "",
-      enc.experiencia_global || "",
-      enc.recomendaria_ips || "",
-      enc.comentarios || "",
-      enc.created_at,
-    ])
+      const headers = [
+        "ID",
+        "Fecha Atención",
+        "Departamento",
+        "Municipio",
+        "Sede",
+        "EPS",
+        "Tipo Afiliado",
+        "Atención Personal",
+        "Claridad Información",
+        "Servicio Humanizado",
+        "Recomendaciones Uso Seguro",
+        "Medicamentos Oportunos",
+        "Localización Acceso",
+        "Horario Atención",
+        "Tiempo Solicitar Medicamentos",
+        "Comodidad Limpieza",
+        "Experiencia Global",
+        "Recomendaría IPS",
+        "Comentarios",
+        "Fecha Registro",
+      ]
 
-    const csvContent = [
-      headers.join(","),
-      ...rows.map((row) => row.map((cell) => `"${cell}"`).join(",")),
-    ].join("\n")
+      const rows = allEncuestas.map((enc) => [
+        enc.id,
+        enc.fecha_atencion,
+        enc.departamentos?.nombre || "",
+        enc.municipios?.nombre || "",
+        enc.sedes?.nombre || "",
+        enc.eps?.nombre || "",
+        enc.tipos_afiliado?.nombre || "",
+        enc.atencion_personal || "",
+        enc.claridad_informacion || "",
+        enc.servicio_humanizado || "",
+        enc.recomendaciones_uso_seguro || "",
+        enc.medicamentos_oportunos || "",
+        enc.localizacion_acceso || "",
+        enc.horario_atencion || "",
+        enc.tiempo_solicitar_medicamentos || "",
+        enc.comodidad_limpieza || "",
+        enc.experiencia_global || "",
+        enc.recomendaria_ips || "",
+        enc.comentarios || "",
+        enc.created_at,
+      ])
 
-    const blob = new Blob(["\ufeff" + csvContent], { type: "text/csv;charset=utf-8;" })
-    const link = document.createElement("a")
-    link.href = URL.createObjectURL(blob)
-    link.download = `encuestas_${format(new Date(), "yyyy-MM-dd")}.csv`
-    link.click()
+      const csvContent = [
+        headers.join(","),
+        ...rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")),
+      ].join("\n")
+
+      const blob = new Blob(["\ufeff" + csvContent], { type: "text/csv;charset=utf-8;" })
+      const link = document.createElement("a")
+      link.href = URL.createObjectURL(blob)
+      link.download = `encuestas_${format(new Date(), "yyyy-MM-dd")}.csv`
+      link.click()
+    } finally {
+      setIsExporting(false)
+    }
   }
 
   // Exportar progreso por sede
@@ -355,12 +374,10 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas, departamentos, mu
       p.pendientes,
       `${p.porcentaje}%`,
     ])
-
     const csvContent = [
       headers.join(","),
       ...rows.map((row) => row.map((cell) => `"${cell}"`).join(",")),
     ].join("\n")
-
     const blob = new Blob(["\ufeff" + csvContent], { type: "text/csv;charset=utf-8;" })
     const link = document.createElement("a")
     link.href = URL.createObjectURL(blob)
@@ -368,11 +385,9 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas, departamentos, mu
     link.click()
   }
 
-  // Exportar progreso semanal por sede
   const exportarProgresoSemanal = (sedeId: number) => {
     const progreso = progresoSedes.find((p) => p.sedeId === sedeId)
     if (!progreso) return
-
     const headers = ["Semana", "Fecha Inicio", "Fecha Fin", "Meta", "Realizadas", "Diferencia"]
     const rows = progreso.semanas.map((s) => [
       `Semana ${s.semana}`,
@@ -382,12 +397,10 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas, departamentos, mu
       s.realizadas,
       s.realizadas - s.meta,
     ])
-
     const csvContent = [
       headers.join(","),
       ...rows.map((row) => row.map((cell) => `"${cell}"`).join(",")),
     ].join("\n")
-
     const blob = new Blob(["\ufeff" + csvContent], { type: "text/csv;charset=utf-8;" })
     const link = document.createElement("a")
     link.href = URL.createObjectURL(blob)
@@ -395,17 +408,10 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas, departamentos, mu
     link.click()
   }
 
-  const limpiarFiltros = () => {
-    setFiltroFechaInicio("")
-    setFiltroFechaFin("")
-    setFiltroSede("all")
-    setCurrentPage(1)
-  }
-
   const statCards = [
     {
       title: "Total Encuestas",
-      value: stats.total.toString(),
+      value: isStatsPending ? "..." : stats.total.toString(),
       description: "Encuestas completadas",
       icon: ClipboardList,
       iconColor: "text-blue-600",
@@ -413,7 +419,7 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas, departamentos, mu
     },
     {
       title: "Experiencia Global",
-      value: stats.promedioExperiencia,
+      value: isStatsPending ? "..." : stats.promedioExperiencia,
       description: "Promedio de 1-5",
       icon: Star,
       iconColor: "text-amber-600",
@@ -421,7 +427,7 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas, departamentos, mu
     },
     {
       title: "Recomendación",
-      value: stats.promedioRecomendacion,
+      value: isStatsPending ? "..." : stats.promedioRecomendacion,
       description: "Promedio de 1-4",
       icon: ThumbsUp,
       iconColor: "text-emerald-600",
@@ -429,7 +435,7 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas, departamentos, mu
     },
     {
       title: "Atención Personal",
-      value: stats.promedioAtencion,
+      value: isStatsPending ? "..." : stats.promedioAtencion,
       description: "Promedio de 1-4",
       icon: Users,
       iconColor: "text-indigo-600",
@@ -486,32 +492,45 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas, departamentos, mu
                     id="fecha-inicio"
                     type="date"
                     value={filtroFechaInicio}
+                    max={filtroFechaFin || undefined}
                     onChange={(e) => {
-                      setFiltroFechaInicio(e.target.value)
-                      setCurrentPage(1)
+                      const val = e.target.value
+                      setFiltroFechaInicio(val)
+                      // If existing fin exceeds 3 months from new inicio, clear it
+                      if (val && filtroFechaFin) {
+                        const maxFin = addMonths(new Date(val), 3)
+                        if (new Date(filtroFechaFin) > maxFin) {
+                          setFiltroFechaFin(format(maxFin, "yyyy-MM-dd"))
+                        }
+                      }
                     }}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="fecha-fin">Fecha Fin</Label>
+                  <Label htmlFor="fecha-fin">
+                    Fecha Fin
+                    {filtroFechaInicio && (
+                      <span className="ml-1 text-xs text-muted-foreground">(máx. 3 meses)</span>
+                    )}
+                  </Label>
                   <Input
                     id="fecha-fin"
                     type="date"
                     value={filtroFechaFin}
-                    onChange={(e) => {
-                      setFiltroFechaFin(e.target.value)
-                      setCurrentPage(1)
-                    }}
+                    min={filtroFechaInicio || undefined}
+                    max={
+                      filtroFechaInicio
+                        ? format(addMonths(new Date(filtroFechaInicio), 3), "yyyy-MM-dd")
+                        : undefined
+                    }
+                    onChange={(e) => setFiltroFechaFin(e.target.value)}
                   />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="sede">Sede</Label>
-                  <Select 
-                    value={filtroSede} 
-                    onValueChange={(value) => {
-                      setFiltroSede(value)
-                      setCurrentPage(1)
-                    }}
+                  <Select
+                    value={filtroSede}
+                    onValueChange={(value) => setFiltroSede(value)}
                   >
                     <SelectTrigger id="sede">
                       <SelectValue placeholder="Todas las sedes" />
@@ -530,25 +549,39 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas, departamentos, mu
                   <Button variant="outline" onClick={limpiarFiltros} className="flex-1">
                     Limpiar
                   </Button>
-                  <Button onClick={exportarExcel} className="flex-1">
-                    <Download className="mr-2 h-4 w-4" />
-                    Exportar
+                  <Button onClick={exportarExcel} disabled={isExporting || !!dateRangeError} className="flex-1">
+                    {isExporting ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Download className="mr-2 h-4 w-4" />
+                    )}
+                    {isExporting ? "Exportando..." : "Exportar"}
                   </Button>
                 </div>
               </div>
+              {dateRangeError && (
+                <p className="mt-2 text-sm text-destructive" role="alert">
+                  {dateRangeError}
+                </p>
+              )}
             </CardContent>
           </Card>
 
           {/* Tabla de encuestas */}
           <Card>
             <CardHeader>
-              <CardTitle>Encuestas</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                Encuestas
+                {isTablePending && (
+                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                )}
+              </CardTitle>
               <CardDescription>
-                Mostrando {paginatedEncuestas.length} de {encuestasFiltradas.length} encuestas
+                Mostrando {encuestasPage.length} de {totalCount} encuestas
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {paginatedEncuestas.length === 0 ? (
+              {encuestasPage.length === 0 && !isTablePending ? (
                 <Empty>
                   <EmptyMedia variant="icon">
                     <ClipboardList className="h-5 w-5" />
@@ -560,7 +593,7 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas, departamentos, mu
                 </Empty>
               ) : (
                 <>
-                  <div className="overflow-x-auto">
+                  <div className={`overflow-x-auto transition-opacity ${isTablePending ? "opacity-50" : "opacity-100"}`}>
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -574,7 +607,7 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas, departamentos, mu
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {paginatedEncuestas.map((encuesta) => (
+                        {encuestasPage.map((encuesta) => (
                           <TableRow key={encuesta.id}>
                             <TableCell className="font-medium">
                               {format(parseISO(encuesta.fecha_atencion), "dd MMM yyyy", { locale: es })}
@@ -614,8 +647,8 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas, departamentos, mu
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                          disabled={currentPage === 1}
+                          onClick={() => handlePageChange(currentPage - 1)}
+                          disabled={currentPage === 1 || isTablePending}
                         >
                           <ChevronLeft className="h-4 w-4" />
                           Anterior
@@ -623,8 +656,8 @@ export function AdminDashboard({ encuestas, sedes, sedesMetas, departamentos, mu
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                          disabled={currentPage === totalPages}
+                          onClick={() => handlePageChange(currentPage + 1)}
+                          disabled={currentPage === totalPages || isTablePending}
                         >
                           Siguiente
                           <ChevronRight className="h-4 w-4" />
