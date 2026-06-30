@@ -44,7 +44,7 @@ import {
   Settings,
   Loader2,
 } from "lucide-react"
-import { format, parseISO, startOfWeek, endOfWeek, differenceInWeeks, addWeeks, startOfMonth, endOfMonth, differenceInCalendarMonths } from "date-fns"
+import { format, parseISO, startOfWeek, endOfWeek, differenceInWeeks, addWeeks, startOfMonth, endOfMonth, differenceInCalendarMonths, addMonths, subMonths } from "date-fns"
 import { es } from "date-fns/locale"
 import {
   fetchEncuestasPage,
@@ -153,6 +153,7 @@ export function AdminDashboard({
   const [filtroSede, setFiltroSede] = useState<string>("all")
   const [currentPage, setCurrentPage] = useState(1)
   const [busquedaSede, setBusquedaSede] = useState("")
+  const [dateRangeError, setDateRangeError] = useState<string | null>(null)
 
   // Server-driven state
   const [encuestasPage, setEncuestasPage] = useState<Encuesta[]>(initialEncuestas)
@@ -196,8 +197,25 @@ export function AdminDashboard({
     })
   }, [])
 
-  // Re-fetch when filters change
+  // Re-fetch when filters change — but block if the date range exceeds 3 months
   useEffect(() => {
+    if (filtroFechaInicio && filtroFechaFin) {
+      const inicio = new Date(filtroFechaInicio)
+      const fin = new Date(filtroFechaFin)
+
+      if (fin < inicio) {
+        setDateRangeError("La fecha fin no puede ser anterior a la fecha inicio.")
+        return
+      }
+
+      const maxFin = addMonths(inicio, 3)
+      if (fin > maxFin) {
+        setDateRangeError("El rango de fechas no puede superar los 3 meses.")
+        return
+      }
+    }
+
+    setDateRangeError(null)
     applyFilters(currentFilters())
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtroFechaInicio, filtroFechaFin, filtroSede])
@@ -210,6 +228,7 @@ export function AdminDashboard({
     setFiltroFechaInicio("")
     setFiltroFechaFin("")
     setFiltroSede("all")
+    setDateRangeError(null)
   }
 
   // Calcular progreso por sede usando sedeEncuestasData (todos los registros, sin límite)
@@ -473,15 +492,37 @@ export function AdminDashboard({
                     id="fecha-inicio"
                     type="date"
                     value={filtroFechaInicio}
-                    onChange={(e) => setFiltroFechaInicio(e.target.value)}
+                    max={filtroFechaFin || undefined}
+                    onChange={(e) => {
+                      const val = e.target.value
+                      setFiltroFechaInicio(val)
+                      // If existing fin exceeds 3 months from new inicio, clear it
+                      if (val && filtroFechaFin) {
+                        const maxFin = addMonths(new Date(val), 3)
+                        if (new Date(filtroFechaFin) > maxFin) {
+                          setFiltroFechaFin(format(maxFin, "yyyy-MM-dd"))
+                        }
+                      }
+                    }}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="fecha-fin">Fecha Fin</Label>
+                  <Label htmlFor="fecha-fin">
+                    Fecha Fin
+                    {filtroFechaInicio && (
+                      <span className="ml-1 text-xs text-muted-foreground">(máx. 3 meses)</span>
+                    )}
+                  </Label>
                   <Input
                     id="fecha-fin"
                     type="date"
                     value={filtroFechaFin}
+                    min={filtroFechaInicio || undefined}
+                    max={
+                      filtroFechaInicio
+                        ? format(addMonths(new Date(filtroFechaInicio), 3), "yyyy-MM-dd")
+                        : undefined
+                    }
                     onChange={(e) => setFiltroFechaFin(e.target.value)}
                   />
                 </div>
@@ -508,7 +549,7 @@ export function AdminDashboard({
                   <Button variant="outline" onClick={limpiarFiltros} className="flex-1">
                     Limpiar
                   </Button>
-                  <Button onClick={exportarExcel} disabled={isExporting} className="flex-1">
+                  <Button onClick={exportarExcel} disabled={isExporting || !!dateRangeError} className="flex-1">
                     {isExporting ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : (
@@ -518,6 +559,11 @@ export function AdminDashboard({
                   </Button>
                 </div>
               </div>
+              {dateRangeError && (
+                <p className="mt-2 text-sm text-destructive" role="alert">
+                  {dateRangeError}
+                </p>
+              )}
             </CardContent>
           </Card>
 

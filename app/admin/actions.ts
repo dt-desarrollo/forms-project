@@ -45,7 +45,13 @@ export type EncuestaRow = {
 
 function applyFilters(query: any, filters: EncuestaFilters) {
   if (filters.fechaInicio) query = query.gte("fecha_atencion", filters.fechaInicio)
-  if (filters.fechaFin) query = query.lte("fecha_atencion", filters.fechaFin)
+  // Use the day after fechaFin so the entire last day is included (handles both
+  // date and timestamp columns without depending on time-of-day comparisons).
+  if (filters.fechaFin) {
+    const nextDay = new Date(filters.fechaFin)
+    nextDay.setDate(nextDay.getDate() + 1)
+    query = query.lt("fecha_atencion", nextDay.toISOString().slice(0, 10))
+  }
   if (filters.sedeId) query = query.eq("sede_id", filters.sedeId)
   return query
 }
