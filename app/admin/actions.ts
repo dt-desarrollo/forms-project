@@ -77,9 +77,13 @@ export async function fetchEncuestasPage(
     )
     .order("fecha_atencion", { ascending: false })
     .order("created_at", { ascending: false })
-    .range(from, to)
 
+  // Apply filters BEFORE range so the server paginates the filtered result set,
+  // not the entire table. Putting .range() before filters caused it to slice
+  // the unfiltered table and then apply the where clause on top of that slice,
+  // making records outside the current page's window invisible.
   query = applyFilters(query, filters)
+  query = query.range(from, to)
 
   const { data, count, error } = await query
   return { data: (data ?? []) as EncuestaRow[], count: count ?? 0, error: error?.message ?? null }
@@ -106,9 +110,9 @@ export async function fetchEncuestasStats(
       .select("experiencia_global, recomendaria_ips, atencion_personal", {
         count: pageNum === 0 ? "exact" : "estimated",
       })
-      .range(pageNum * PAGE_SIZE, (pageNum + 1) * PAGE_SIZE - 1)
 
     query = applyFilters(query, filters)
+    query = query.range(pageNum * PAGE_SIZE, (pageNum + 1) * PAGE_SIZE - 1)
 
     const { data, count } = await query
 
@@ -178,9 +182,9 @@ export async function fetchAllEncuestasForExport(
       )
       .order("fecha_atencion", { ascending: false })
       .order("created_at", { ascending: false })
-      .range(pageNum * PAGE_SIZE, (pageNum + 1) * PAGE_SIZE - 1)
 
     query = applyFilters(query, filters)
+    query = query.range(pageNum * PAGE_SIZE, (pageNum + 1) * PAGE_SIZE - 1)
 
     const { data } = await query
 
