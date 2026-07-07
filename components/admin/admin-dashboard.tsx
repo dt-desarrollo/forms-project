@@ -43,6 +43,7 @@ import {
   Search,
   Settings,
   Loader2,
+  FileSpreadsheet,
 } from "lucide-react"
 import { format, parseISO, startOfWeek, endOfWeek, differenceInWeeks, addWeeks, startOfMonth, endOfMonth, differenceInCalendarMonths, addMonths, subMonths } from "date-fns"
 import { es } from "date-fns/locale"
@@ -105,6 +106,12 @@ interface Departamento {
   nombre: string
 }
 
+interface EpsItem {
+  id: number
+  nombre: string
+  activo: boolean
+}
+
 interface AdminDashboardProps {
   initialEncuestas: Encuesta[]
   initialTotal: number
@@ -116,6 +123,7 @@ interface AdminDashboardProps {
   departamentos: Departamento[]
   municipios: MunicipioConDepto[]
   sedesCompletas: SedeCompleta[]
+  eps: EpsItem[]
 }
 
 const ITEMS_PER_PAGE = 10
@@ -147,6 +155,7 @@ export function AdminDashboard({
   departamentos,
   municipios,
   sedesCompletas,
+  eps,
 }: AdminDashboardProps) {
   const [filtroFechaInicio, setFiltroFechaInicio] = useState("")
   const [filtroFechaFin, setFiltroFechaFin] = useState("")
@@ -164,6 +173,7 @@ export function AdminDashboard({
   const [isTablePending, startTableTransition] = useTransition()
   const [isStatsPending, startStatsTransition] = useTransition()
   const [isExporting, setIsExporting] = useState(false)
+  const [isExportingInforme, setIsExportingInforme] = useState(false)
 
   const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE)
 
@@ -408,6 +418,265 @@ export function AdminDashboard({
     link.click()
   }
 
+  // Preguntas con sus etiquetas y escala máxima
+  const PREGUNTAS = [
+    { key: "atencion_personal" as const, label: "Atención Personal", max: 4 },
+    { key: "claridad_informacion" as const, label: "Claridad de la Información", max: 4 },
+    { key: "servicio_humanizado" as const, label: "Servicio Humanizado", max: 4 },
+    { key: "recomendaciones_uso_seguro" as const, label: "Recomendaciones Uso Seguro", max: 4 },
+    { key: "medicamentos_oportunos" as const, label: "Medicamentos Oportunos", max: 4 },
+    { key: "localizacion_acceso" as const, label: "Localización y Acceso", max: 4 },
+    { key: "horario_atencion" as const, label: "Horario de Atención", max: 4 },
+    { key: "tiempo_solicitar_medicamentos" as const, label: "Tiempo para Solicitar Medicamentos", max: 4 },
+    { key: "comodidad_limpieza" as const, label: "Comodidad y Limpieza", max: 4 },
+    { key: "experiencia_global" as const, label: "Experiencia Global", max: 5 },
+    { key: "recomendaria_ips" as const, label: "Recomendaría la IPS", max: 4 },
+  ] as const
+
+  const exportarInformeExcel = async () => {
+    setIsExportingInforme(true)
+    try {
+      const allEncuestas = await fetchAllEncuestasForExport(currentFilters())
+
+      if (allEncuestas.length === 0) {
+        // Use dynamic import to avoid server-side issues with toast
+        const { toast } = await import("sonner")
+        toast.error("No hay encuestas para generar el informe con los filtros seleccionados")
+        return
+      }
+
+      const XLSX = await import("xlsx")
+      const wb = XLSX.utils.book_new()
+
+      const n = allEncuestas.length
+
+      const avg = (key: typeof PREGUNTAS[number]["key"]) =>
+        n > 0 ? allEncuestas.reduce((s, e) => s + (Number(e[key]) || 0), 0) / n : 0
+
+      // ---- Hoja 1: Resumen ----
+      const resumenData: (string | number)[][] = [
+        ["INFORME DE SATISFACCIÓN"],
+        ["Generado:", format(new Date(), "dd/MM/yyyy HH:mm", { locale: es })],
+        [],
+        ["Total de encuestas analizadas", n],
+        [],
+        ["PROMEDIOS GENERALES POR PREGUNTA"],
+        ["Pregunta", "Escala", "Promedio", "% Satisfacción"],
+        ...PREGUNTAS.map(({ key, label, max }) => {
+          const promedio = avg(key)
+          return [label, `1 - ${max}`, parseFloat(promedio.toFixed(2)), parseFloat(((promedio / max) * 100).toFixed(1))]
+        }),
+      ]
+      const wsResumen = XLSX.utils.aoa_to_sheet(resumenData)
+      wsResumen["!cols"] = [{ wch: 45 }, { wch: 10 }, { wch: 12 }, { wch: 16 }]
+      XLSX.utils.book_append_sheet(wb, wsResumen, "Resumen")
+
+      // ---- Hoja 2: Promedios por Pregunta ----
+      const promediosData: (string | number)[][] = [
+        ["Pregunta", "Escala Máx.", "Promedio", "% de Satisfacción"],
+        ...PREGUNTAS.map(({ key, label, max }) => {
+          const promedio = avg(key)
+          return [label, max, parseFloat(promedio.toFixed(2)), parseFloat(((promedio / max) * 100).toFixed(1))]
+        }),
+      ]
+      const wsPromedios = XLSX.utils.aoa_to_sheet(promediosData)
+      wsPromedios["!cols"] = [{ wch: 45 }, { wch: 14 }, { wch: 12 }, { wch: 18 }]
+      XLSX.utils.book_append_sheet(wb, wsPromedios, "Promedios por Pregunta")
+
+      // ---- Hoja 3: Distribución de Respuestas ----
+      const distData: (string | number)[][] = [
+        ["Pregunta", "Escala", "Valor 1", "Valor 2", "Valor 3", "Valor 4", "Valor 5", "Total"],
+        ...PREGUNTAS.map(({ key, label, max }) => {
+          const counts = [0, 0, 0, 0, 0]
+          allEncuestas.forEach((e) => {
+            const v = Number(e[key])
+            if (v >= 1 && v <= 5) counts[v - 1]++
+          })
+          return [
+            label,
+            `1 - ${max}`,
+            counts[0],
+            counts[1],
+            counts[2],
+            counts[3],
+            max === 5 ? counts[4] : 0,
+            n,
+          ]
+        }),
+      ]
+      const wsDist = XLSX.utils.aoa_to_sheet(distData)
+      wsDist["!cols"] = [{ wch: 45 }, { wch: 8 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 8 }]
+      XLSX.utils.book_append_sheet(wb, wsDist, "Distribución de Respuestas")
+
+      // ---- Hoja 4: Análisis por EPS ----
+      const epsMap = new Map<string, Encuesta[]>()
+      allEncuestas.forEach((e) => {
+        const key = e.eps?.nombre || "Sin EPS"
+        if (!epsMap.has(key)) epsMap.set(key, [])
+        epsMap.get(key)!.push(e)
+      })
+      const epsHeaders = ["EPS", "Total Encuestas", ...PREGUNTAS.map((p) => p.label), "Promedio General"]
+      const epsRows = Array.from(epsMap.entries())
+        .map(([epsNombre, encuestas]) => {
+          const promedios = PREGUNTAS.map(({ key }) => {
+            const s = encuestas.reduce((acc, e) => acc + (Number(e[key]) || 0), 0)
+            return parseFloat((s / encuestas.length).toFixed(2))
+          })
+          const promGeneral = parseFloat((promedios.reduce((a, b) => a + b, 0) / promedios.length).toFixed(2))
+          return [epsNombre, encuestas.length, ...promedios, promGeneral]
+        })
+        .sort((a, b) => (b[1] as number) - (a[1] as number))
+      const wsEps = XLSX.utils.aoa_to_sheet([epsHeaders, ...epsRows])
+      wsEps["!cols"] = [{ wch: 30 }, { wch: 16 }, ...PREGUNTAS.map(() => ({ wch: 14 })), { wch: 16 }]
+      XLSX.utils.book_append_sheet(wb, wsEps, "Análisis por EPS")
+
+      // ---- Hoja 5: Análisis por Sede ----
+      const sedeMap = new Map<string, { encuestas: Encuesta[]; municipio: string; departamento: string }>()
+      allEncuestas.forEach((e) => {
+        const key = e.sedes?.nombre || "Sin Sede"
+        if (!sedeMap.has(key)) {
+          sedeMap.set(key, {
+            encuestas: [],
+            municipio: e.municipios?.nombre || "",
+            departamento: e.departamentos?.nombre || "",
+          })
+        }
+        sedeMap.get(key)!.encuestas.push(e)
+      })
+      const sedeHeaders = ["Sede", "Municipio", "Departamento", "Total Encuestas", ...PREGUNTAS.map((p) => p.label), "Promedio General"]
+      const sedeRows = Array.from(sedeMap.entries())
+        .map(([sedeNombre, { encuestas, municipio, departamento }]) => {
+          const promedios = PREGUNTAS.map(({ key }) => {
+            const s = encuestas.reduce((acc, e) => acc + (Number(e[key]) || 0), 0)
+            return parseFloat((s / encuestas.length).toFixed(2))
+          })
+          const promGeneral = parseFloat((promedios.reduce((a, b) => a + b, 0) / promedios.length).toFixed(2))
+          return [sedeNombre, municipio, departamento, encuestas.length, ...promedios, promGeneral]
+        })
+        .sort((a, b) => (b[3] as number) - (a[3] as number))
+      const wsSede = XLSX.utils.aoa_to_sheet([sedeHeaders, ...sedeRows])
+      wsSede["!cols"] = [{ wch: 30 }, { wch: 20 }, { wch: 20 }, { wch: 16 }, ...PREGUNTAS.map(() => ({ wch: 14 })), { wch: 16 }]
+      XLSX.utils.book_append_sheet(wb, wsSede, "Análisis por Sede")
+
+      // ---- Hoja 6: Detalle Cualitativo (misma estructura que CSV, valores en texto) ----
+      // Escala estándar 1-4: Malo / Regular / Bueno / Excelente
+      const etiquetaRating = (v: number | null | undefined): string => {
+        switch (Number(v)) {
+          case 1: return "Malo"
+          case 2: return "Regular"
+          case 3: return "Bueno"
+          case 4: return "Excelente"
+          default: return ""
+        }
+      }
+      // Experiencia Global 1-5: Muy Malo / Malo / Regular / Bueno / Muy Buena
+      const etiquetaExperiencia = (v: number | null | undefined): string => {
+        switch (Number(v)) {
+          case 1: return "Muy Malo"
+          case 2: return "Malo"
+          case 3: return "Regular"
+          case 4: return "Buena"
+          case 5: return "Muy Buena"
+          default: return ""
+        }
+      }
+      // Recomendaría IPS 1-4: escala de intención
+      const etiquetaRecomendaria = (v: number | null | undefined): string => {
+        switch (Number(v)) {
+          case 1: return "Definitivamente no"
+          case 2: return "Probablemente no"
+          case 3: return "Probablemente si"
+          case 4: return "Definitivamente si"
+          default: return ""
+        }
+      }
+
+      const detalleHeaders = [
+        "ID",
+        "Fecha Atención",
+        "Departamento",
+        "Municipio",
+        "Sede",
+        "EPS",
+        "Tipo Afiliado",
+        "Atención Personal",
+        "Claridad de la Información",
+        "Servicio Humanizado",
+        "Recomendaciones Uso Seguro",
+        "Medicamentos Oportunos",
+        "Localización y Acceso",
+        "Horario de Atención",
+        "Tiempo para Solicitar Medicamentos",
+        "Comodidad y Limpieza",
+        "Experiencia Global",
+        "Recomendaría la IPS",
+        "Comentarios",
+        "Fecha Registro",
+      ]
+      const detalleRows = allEncuestas.map((e) => [
+        e.id,
+        e.fecha_atencion,
+        e.departamentos?.nombre || "",
+        e.municipios?.nombre || "",
+        e.sedes?.nombre || "",
+        e.eps?.nombre || "",
+        e.tipos_afiliado?.nombre || "",
+        etiquetaRating(e.atencion_personal),
+        etiquetaRating(e.claridad_informacion),
+        etiquetaRating(e.servicio_humanizado),
+        etiquetaRating(e.recomendaciones_uso_seguro),
+        etiquetaRating(e.medicamentos_oportunos),
+        etiquetaRating(e.localizacion_acceso),
+        etiquetaRating(e.horario_atencion),
+        etiquetaRating(e.tiempo_solicitar_medicamentos),
+        etiquetaRating(e.comodidad_limpieza),
+        etiquetaExperiencia(e.experiencia_global),
+        etiquetaRecomendaria(e.recomendaria_ips),
+        e.comentarios || "",
+        e.created_at || "",
+      ])
+      const wsDetalle = XLSX.utils.aoa_to_sheet([detalleHeaders, ...detalleRows])
+      wsDetalle["!cols"] = [
+        { wch: 38 }, { wch: 14 }, { wch: 18 }, { wch: 18 }, { wch: 28 }, { wch: 20 }, { wch: 16 },
+        { wch: 18 }, { wch: 26 }, { wch: 20 }, { wch: 28 }, { wch: 22 }, { wch: 22 }, { wch: 20 },
+        { wch: 32 }, { wch: 20 }, { wch: 18 }, { wch: 22 }, { wch: 40 }, { wch: 26 },
+      ]
+      XLSX.utils.book_append_sheet(wb, wsDetalle, "Detalle Cualitativo")
+
+      // ---- Hoja 8: Comentarios Cualitativos ----
+      const comentariosContenido = allEncuestas.filter((e) => e.comentarios && e.comentarios.trim())
+      const comentariosData: (string | number)[][] = [
+        ["Fecha Atención", "Sede", "Municipio", "Departamento", "EPS", "Tipo Afiliado", "Comentario"],
+        ...comentariosContenido.map((e) => [
+          e.fecha_atencion,
+          e.sedes?.nombre || "",
+          e.municipios?.nombre || "",
+          e.departamentos?.nombre || "",
+          e.eps?.nombre || "",
+          e.tipos_afiliado?.nombre || "",
+          e.comentarios || "",
+        ]),
+      ]
+      const wsComentarios = XLSX.utils.aoa_to_sheet(comentariosData)
+      wsComentarios["!cols"] = [{ wch: 14 }, { wch: 28 }, { wch: 18 }, { wch: 18 }, { wch: 20 }, { wch: 16 }, { wch: 60 }]
+      XLSX.utils.book_append_sheet(wb, wsComentarios, "Comentarios")
+
+      // Descargar
+      const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer
+      const blob = new Blob([buf], { type: "application/octet-stream" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `informe_satisfaccion_${format(new Date(), "yyyy-MM-dd")}.xlsx`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } finally {
+      setIsExportingInforme(false)
+    }
+  }
+
   const statCards = [
     {
       title: "Total Encuestas",
@@ -555,7 +824,22 @@ export function AdminDashboard({
                     ) : (
                       <Download className="mr-2 h-4 w-4" />
                     )}
-                    {isExporting ? "Exportando..." : "Exportar"}
+                    {isExporting ? "Exportando..." : "Exportar CSV"}
+                  </Button>
+                </div>
+                <div className="flex items-end sm:col-span-2 lg:col-span-4">
+                  <Button
+                    variant="secondary"
+                    onClick={exportarInformeExcel}
+                    disabled={isExportingInforme || !!dateRangeError}
+                    className="w-full sm:w-auto"
+                  >
+                    {isExportingInforme ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <FileSpreadsheet className="mr-2 h-4 w-4" />
+                    )}
+                    {isExportingInforme ? "Generando informe..." : "Informe Analítico Excel"}
                   </Button>
                 </div>
               </div>
@@ -723,7 +1007,7 @@ export function AdminDashboard({
               ) : (
                 <Accordion type="single" collapsible className="w-full">
                   {progresoSedesFiltradas.map((progreso) => (
-                    <AccordionItem key={progreso.sedeId} value={progreso.sedeId}>
+                    <AccordionItem key={progreso.sedeId} value={progreso.sedeId.toString()}>
                       <AccordionTrigger className="hover:no-underline px-4 rounded-lg hover:bg-muted/50">
                         <div className="flex flex-1 items-center justify-between pr-4">
                           <div className="text-left">
@@ -833,6 +1117,7 @@ export function AdminDashboard({
             municipios={municipios}
             sedes={sedesCompletas}
             sedesMetas={sedesMetas}
+            eps={eps}
           />
         </TabsContent>
       </Tabs>

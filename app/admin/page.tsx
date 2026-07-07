@@ -44,6 +44,7 @@ export default async function AdminPage() {
     { data: departamentos },
     { data: municipios },
     { data: sedesCompletas },
+    { data: epsData },
   ] = await Promise.all([
     fetchEncuestasPage({}, 1, 10),
     fetchEncuestasStats({}),
@@ -59,6 +60,7 @@ export default async function AdminPage() {
       .from("sedes")
       .select("id, nombre, municipio_id, activo, municipios(nombre, departamento_id)")
       .order("nombre"),
+    supabase.from("eps").select("id, nombre, activo").order("nombre"),
   ])
 
   return (
@@ -94,6 +96,7 @@ export default async function AdminPage() {
           departamentos={departamentos || []}
           municipios={(municipios || []) as any}
           sedesCompletas={(sedesCompletas || []) as any}
+          eps={(epsData || []) as any}
         />
       </div>
     </main>

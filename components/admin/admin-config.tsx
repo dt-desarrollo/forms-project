@@ -35,9 +35,9 @@ import {
 import { Empty, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
 import { Spinner } from "@/components/ui/spinner"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
-import { MapPin, Building2, Landmark, Plus, Pencil, Search, Target, CalendarDays, CheckCircle2, AlertCircle } from "lucide-react"
+import { MapPin, Building2, Landmark, Plus, Pencil, Search, Target, CalendarDays, CheckCircle2, AlertCircle, HeartPulse } from "lucide-react"
 import { toast } from "sonner"
-import type { Departamento, Municipio, Sede } from "@/lib/types"
+import type { Departamento, Municipio, Sede, Eps } from "@/lib/types"
 
 interface SedeMeta {
   id: number
@@ -52,6 +52,7 @@ interface AdminConfigProps {
   municipios: MunicipioConDepto[]
   sedes: SedeCompleta[]
   sedesMetas: SedeMeta[]
+  eps: Eps[]
 }
 
 interface MunicipioConDepto extends Municipio {
@@ -1046,9 +1047,189 @@ function MetasTab({
   )
 }
 
+// ---- EPS ----
+
+function EpsTab({ eps: initialEps }: { eps: Eps[] }) {
+  const supabase = createClient()
+  const [epsList, setEpsList] = useState(initialEps)
+  const [nuevoNombre, setNuevoNombre] = useState("")
+  const [busqueda, setBusqueda] = useState("")
+  const [filtroEstado, setFiltroEstado] = useState<"all" | "activa" | "inactiva">("all")
+  const [isPending, startTransition] = useTransition()
+  const [togglingId, setTogglingId] = useState<number | null>(null)
+
+  const epsFiltradas = epsList.filter((e) => {
+    const matchBusqueda = e.nombre.toLowerCase().includes(busqueda.toLowerCase())
+    const matchEstado =
+      filtroEstado === "all" ||
+      (filtroEstado === "activa" && e.activo) ||
+      (filtroEstado === "inactiva" && !e.activo)
+    return matchBusqueda && matchEstado
+  })
+
+  const handleCrear = () => {
+    const nombre = nuevoNombre.trim()
+    if (!nombre) return
+    if (epsList.some((e) => e.nombre.toLowerCase() === nombre.toLowerCase())) {
+      toast.error("Ya existe una EPS con ese nombre")
+      return
+    }
+
+    startTransition(async () => {
+      const { data, error } = await supabase
+        .from("eps")
+        .insert({ nombre, activo: true })
+        .select()
+        .single()
+
+      if (error) {
+        toast.error("Error al crear EPS: " + error.message)
+        return
+      }
+      setEpsList((prev) => [...prev, data as Eps].sort((a, b) => a.nombre.localeCompare(b.nombre)))
+      setNuevoNombre("")
+      toast.success(`EPS "${nombre}" creada exitosamente`)
+    })
+  }
+
+  const handleToggleActivo = (eps: Eps) => {
+    setTogglingId(eps.id)
+    startTransition(async () => {
+      const { error } = await supabase
+        .from("eps")
+        .update({ activo: !eps.activo })
+        .eq("id", eps.id)
+
+      if (error) {
+        toast.error("Error al actualizar estado: " + error.message)
+        setTogglingId(null)
+        return
+      }
+      setEpsList((prev) =>
+        prev.map((e) => (e.id === eps.id ? { ...e, activo: !e.activo } : e))
+      )
+      toast.success(
+        !eps.activo ? `EPS "${eps.nombre}" habilitada` : `EPS "${eps.nombre}" deshabilitada`
+      )
+      setTogglingId(null)
+    })
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Plus className="size-4" />
+            Nueva EPS
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="nuevo-eps">Nombre</FieldLabel>
+              <div className="flex gap-2">
+                <Input
+                  id="nuevo-eps"
+                  placeholder="Ej: SURA"
+                  value={nuevoNombre}
+                  onChange={(e) => setNuevoNombre(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleCrear()}
+                />
+                <Button onClick={handleCrear} disabled={!nuevoNombre.trim() || isPending}>
+                  {isPending ? <Spinner className="mr-2 size-4" /> : <Plus data-icon="inline-start" />}
+                  Crear
+                </Button>
+              </div>
+            </Field>
+          </FieldGroup>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">EPS ({epsList.length})</CardTitle>
+          <CardDescription>
+            Puedes habilitar o deshabilitar EPS. Las EPS deshabilitadas no aparecen en la encuesta.
+          </CardDescription>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Buscar EPS..."
+                value={busqueda}
+                onChange={(e) => setBusqueda(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            <Select
+              value={filtroEstado}
+              onValueChange={(v) => setFiltroEstado(v as typeof filtroEstado)}
+            >
+              <SelectTrigger className="w-36">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas</SelectItem>
+                <SelectItem value="activa">Activas</SelectItem>
+                <SelectItem value="inactiva">Inactivas</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {epsFiltradas.length === 0 ? (
+            <Empty>
+              <EmptyMedia variant="icon"><HeartPulse className="size-5" /></EmptyMedia>
+              <EmptyTitle>Sin EPS</EmptyTitle>
+              <EmptyDescription>No se encontraron EPS con los filtros aplicados.</EmptyDescription>
+            </Empty>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Nombre</TableHead>
+                  <TableHead className="text-center">Estado</TableHead>
+                  <TableHead className="text-right">ID</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {epsFiltradas.map((eps) => (
+                  <TableRow key={eps.id}>
+                    <TableCell className="font-medium">{eps.nombre}</TableCell>
+                    <TableCell className="text-center">
+                      <div className="flex items-center justify-center gap-2">
+                        <Switch
+                          checked={eps.activo}
+                          onCheckedChange={() => handleToggleActivo(eps)}
+                          disabled={togglingId === eps.id}
+                          aria-label={eps.activo ? "Deshabilitar EPS" : "Habilitar EPS"}
+                        />
+                        <Badge
+                          variant={eps.activo ? "default" : "secondary"}
+                          className={eps.activo ? "bg-emerald-600" : ""}
+                        >
+                          {eps.activo ? "Activa" : "Inactiva"}
+                        </Badge>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right text-muted-foreground text-sm">
+                      {eps.id}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
 // ---- Main component ----
 
-export function AdminConfig({ departamentos, municipios: initialMunicipios, sedes: initialSedes, sedesMetas }: AdminConfigProps) {
+export function AdminConfig({ departamentos, municipios: initialMunicipios, sedes: initialSedes, sedesMetas, eps }: AdminConfigProps) {
   // Elevate municipios state so MunicipiosTab and SedesTab share the same list.
   const [municipios, setMunicipios] = useState(initialMunicipios)
   // Elevate sedes state so SedesTab and MetasTab share the same list.
@@ -1071,7 +1252,7 @@ export function AdminConfig({ departamentos, municipios: initialMunicipios, sede
       <div>
         <h2 className="text-lg font-semibold">Configuracion</h2>
         <p className="text-sm text-muted-foreground">
-          Administra los departamentos, municipios y sedes disponibles en la encuesta.
+          Administra los departamentos, municipios, sedes y EPS disponibles en la encuesta.
         </p>
       </div>
       <Separator />
@@ -1093,6 +1274,10 @@ export function AdminConfig({ departamentos, municipios: initialMunicipios, sede
           <TabsTrigger value="metas">
             <Target data-icon="inline-start" />
             Metas
+          </TabsTrigger>
+          <TabsTrigger value="eps">
+            <HeartPulse data-icon="inline-start" />
+            EPS
           </TabsTrigger>
         </TabsList>
 
@@ -1116,6 +1301,9 @@ export function AdminConfig({ departamentos, municipios: initialMunicipios, sede
         </TabsContent>
         <TabsContent value="metas">
           <MetasTab sedes={sedes} sedesMetas={sedesMetas} />
+        </TabsContent>
+        <TabsContent value="eps">
+          <EpsTab eps={eps} />
         </TabsContent>
       </Tabs>
     </div>
