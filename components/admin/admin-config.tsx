@@ -38,6 +38,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { MapPin, Building2, Landmark, Plus, Pencil, Search, Target, CalendarDays, CheckCircle2, AlertCircle, HeartPulse } from "lucide-react"
 import { toast } from "sonner"
 import type { Departamento, Municipio, Sede, Eps } from "@/lib/types"
+import { crearEps, toggleEpsActivo } from "@/app/admin/actions"
 
 interface SedeMeta {
   id: number
@@ -1050,7 +1051,6 @@ function MetasTab({
 // ---- EPS ----
 
 function EpsTab({ eps: initialEps }: { eps: Eps[] }) {
-  const supabase = createClient()
   const [epsList, setEpsList] = useState(initialEps)
   const [nuevoNombre, setNuevoNombre] = useState("")
   const [busqueda, setBusqueda] = useState("")
@@ -1076,17 +1076,15 @@ function EpsTab({ eps: initialEps }: { eps: Eps[] }) {
     }
 
     startTransition(async () => {
-      const { data, error } = await supabase
-        .from("eps")
-        .insert({ nombre, activo: true })
-        .select()
-        .single()
+      const { data, error } = await crearEps(nombre)
 
       if (error) {
-        toast.error("Error al crear EPS: " + error.message)
+        toast.error("Error al crear EPS: " + error)
         return
       }
-      setEpsList((prev) => [...prev, data as Eps].sort((a, b) => a.nombre.localeCompare(b.nombre)))
+      if (data) {
+        setEpsList((prev) => [...prev, data].sort((a, b) => a.nombre.localeCompare(b.nombre)))
+      }
       setNuevoNombre("")
       toast.success(`EPS "${nombre}" creada exitosamente`)
     })
@@ -1095,13 +1093,10 @@ function EpsTab({ eps: initialEps }: { eps: Eps[] }) {
   const handleToggleActivo = (eps: Eps) => {
     setTogglingId(eps.id)
     startTransition(async () => {
-      const { error } = await supabase
-        .from("eps")
-        .update({ activo: !eps.activo })
-        .eq("id", eps.id)
+      const { error } = await toggleEpsActivo(eps.id, !eps.activo)
 
       if (error) {
-        toast.error("Error al actualizar estado: " + error.message)
+        toast.error("Error al actualizar estado: " + error)
         setTogglingId(null)
         return
       }
