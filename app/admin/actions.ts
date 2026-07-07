@@ -1,6 +1,56 @@
 "use server"
 
 import { createClient } from "@/lib/supabase/server"
+import type { Eps } from "@/lib/types"
+
+// ---- EPS Actions ----
+
+export async function crearEps(nombre: string): Promise<{ data: Eps | null; error: string | null }> {
+  const supabase = await createClient()
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { data: null, error: "No autenticado" }
+
+  const { data: adminData } = await supabase
+    .from("admin_users")
+    .select("id")
+    .eq("id", user.id)
+    .single()
+
+  if (!adminData) return { data: null, error: "No tienes permisos de administrador" }
+
+  const { data, error } = await supabase
+    .from("eps")
+    .insert({ nombre: nombre.trim(), activo: true })
+    .select()
+    .single()
+
+  if (error) return { data: null, error: error.message }
+  return { data: data as Eps, error: null }
+}
+
+export async function toggleEpsActivo(id: number, activo: boolean): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: "No autenticado" }
+
+  const { data: adminData } = await supabase
+    .from("admin_users")
+    .select("id")
+    .eq("id", user.id)
+    .single()
+
+  if (!adminData) return { error: "No tienes permisos de administrador" }
+
+  const { error } = await supabase
+    .from("eps")
+    .update({ activo })
+    .eq("id", id)
+
+  if (error) return { error: error.message }
+  return { error: null }
+}
 
 const PAGE_SIZE = 1000
 
