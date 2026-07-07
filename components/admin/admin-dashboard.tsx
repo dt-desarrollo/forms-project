@@ -558,7 +558,92 @@ export function AdminDashboard({
       wsSede["!cols"] = [{ wch: 30 }, { wch: 20 }, { wch: 20 }, { wch: 16 }, ...PREGUNTAS.map(() => ({ wch: 14 })), { wch: 16 }]
       XLSX.utils.book_append_sheet(wb, wsSede, "Análisis por Sede")
 
-      // ---- Hoja 6: Comentarios Cualitativos ----
+      // ---- Hoja 6: Detalle Cualitativo (misma estructura que CSV, valores en texto) ----
+      // Escala estándar 1-4: Malo / Regular / Bueno / Excelente
+      const etiquetaRating = (v: number | null | undefined): string => {
+        switch (Number(v)) {
+          case 1: return "Malo"
+          case 2: return "Regular"
+          case 3: return "Bueno"
+          case 4: return "Excelente"
+          default: return ""
+        }
+      }
+      // Experiencia Global 1-5: Muy Malo / Malo / Regular / Bueno / Muy Buena
+      const etiquetaExperiencia = (v: number | null | undefined): string => {
+        switch (Number(v)) {
+          case 1: return "Muy Malo"
+          case 2: return "Malo"
+          case 3: return "Regular"
+          case 4: return "Buena"
+          case 5: return "Muy Buena"
+          default: return ""
+        }
+      }
+      // Recomendaría IPS 1-4: escala de intención
+      const etiquetaRecomendaria = (v: number | null | undefined): string => {
+        switch (Number(v)) {
+          case 1: return "Definitivamente no"
+          case 2: return "Probablemente no"
+          case 3: return "Probablemente si"
+          case 4: return "Definitivamente si"
+          default: return ""
+        }
+      }
+
+      const detalleHeaders = [
+        "ID",
+        "Fecha Atención",
+        "Departamento",
+        "Municipio",
+        "Sede",
+        "EPS",
+        "Tipo Afiliado",
+        "Atención Personal",
+        "Claridad de la Información",
+        "Servicio Humanizado",
+        "Recomendaciones Uso Seguro",
+        "Medicamentos Oportunos",
+        "Localización y Acceso",
+        "Horario de Atención",
+        "Tiempo para Solicitar Medicamentos",
+        "Comodidad y Limpieza",
+        "Experiencia Global",
+        "Recomendaría la IPS",
+        "Comentarios",
+        "Fecha Registro",
+      ]
+      const detalleRows = allEncuestas.map((e) => [
+        e.id,
+        e.fecha_atencion,
+        e.departamentos?.nombre || "",
+        e.municipios?.nombre || "",
+        e.sedes?.nombre || "",
+        e.eps?.nombre || "",
+        e.tipos_afiliado?.nombre || "",
+        etiquetaRating(e.atencion_personal),
+        etiquetaRating(e.claridad_informacion),
+        etiquetaRating(e.servicio_humanizado),
+        etiquetaRating(e.recomendaciones_uso_seguro),
+        etiquetaRating(e.medicamentos_oportunos),
+        etiquetaRating(e.localizacion_acceso),
+        etiquetaRating(e.horario_atencion),
+        etiquetaRating(e.tiempo_solicitar_medicamentos),
+        etiquetaRating(e.comodidad_limpieza),
+        etiquetaExperiencia(e.experiencia_global),
+        etiquetaRecomendaria(e.recomendaria_ips),
+        e.comentarios || "",
+        e.created_at || "",
+      ])
+      const wsDetalle = XLSX.utils.aoa_to_sheet([detalleHeaders, ...detalleRows])
+      wsDetalle["!cols"] = [
+        { wch: 38 }, { wch: 14 }, { wch: 18 }, { wch: 18 }, { wch: 28 }, { wch: 20 }, { wch: 16 },
+        { wch: 18 }, { wch: 26 }, { wch: 20 }, { wch: 28 }, { wch: 22 }, { wch: 22 }, { wch: 20 },
+        { wch: 32 }, { wch: 20 }, { wch: 18 }, { wch: 22 }, { wch: 40 }, { wch: 26 },
+      ]
+      XLSX.utils.book_append_sheet(wb, wsDetalle, "Detalle Cualitativo")
+
+      // ---- Hoja 8: Comentarios Cualitativos ----
       const comentariosContenido = allEncuestas.filter((e) => e.comentarios && e.comentarios.trim())
       const comentariosData: (string | number)[][] = [
         ["Fecha Atención", "Sede", "Municipio", "Departamento", "EPS", "Tipo Afiliado", "Comentario"],
