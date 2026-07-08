@@ -1,15 +1,23 @@
 "use server"
 
 import { createClient } from "@/lib/supabase/server"
+import { createClient as createSupabaseClient } from "@supabase/supabase-js"
 import type { Eps } from "@/lib/types"
 
-// ---- EPS Actions ----
+// Cliente con service role key para bypasear RLS en operaciones admin
+function createAdminClient() {
+  return createSupabaseClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { autoRefreshToken: false, persistSession: false } }
+  )
+}
 
-export async function crearEps(nombre: string): Promise<{ data: Eps | null; error: string | null }> {
+// Verifica que el usuario autenticado sea admin
+async function verificarAdmin(): Promise<{ userId: string | null; error: string | null }> {
   const supabase = await createClient()
-
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { data: null, error: "No autenticado" }
+  if (!user) return { userId: null, error: "No autenticado" }
 
   const { data: adminData } = await supabase
     .from("admin_users")
@@ -17,9 +25,18 @@ export async function crearEps(nombre: string): Promise<{ data: Eps | null; erro
     .eq("id", user.id)
     .single()
 
-  if (!adminData) return { data: null, error: "No tienes permisos de administrador" }
+  if (!adminData) return { userId: null, error: "No tienes permisos de administrador" }
+  return { userId: user.id, error: null }
+}
 
-  const { data, error } = await supabase
+// ---- EPS Actions ----
+
+export async function crearEps(nombre: string): Promise<{ data: Eps | null; error: string | null }> {
+  const { error: authError } = await verificarAdmin()
+  if (authError) return { data: null, error: authError }
+
+  const adminClient = createAdminClient()
+  const { data, error } = await adminClient
     .from("eps")
     .insert({ nombre: nombre.trim(), activo: true })
     .select()
@@ -30,20 +47,11 @@ export async function crearEps(nombre: string): Promise<{ data: Eps | null; erro
 }
 
 export async function toggleEpsActivo(id: number, activo: boolean): Promise<{ error: string | null }> {
-  const supabase = await createClient()
+  const { error: authError } = await verificarAdmin()
+  if (authError) return { error: authError }
 
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: "No autenticado" }
-
-  const { data: adminData } = await supabase
-    .from("admin_users")
-    .select("id")
-    .eq("id", user.id)
-    .single()
-
-  if (!adminData) return { error: "No tienes permisos de administrador" }
-
-  const { error } = await supabase
+  const adminClient = createAdminClient()
+  const { error } = await adminClient
     .from("eps")
     .update({ activo })
     .eq("id", id)
