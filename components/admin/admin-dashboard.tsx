@@ -453,34 +453,83 @@ export function AdminDashboard({
       const avg = (key: typeof PREGUNTAS[number]["key"]) =>
         n > 0 ? allEncuestas.reduce((s, e) => s + (Number(e[key]) || 0), 0) / n : 0
 
+      // Categoriza las respuestas siguiendo la metodología del informe oficial (PDF):
+      // los 2 valores más altos de cada escala = SATISFACCIÓN, el resto = INSATISFACCIÓN.
+      // Las respuestas nulas / sin diligenciar no cuentan en ninguna categoría, pero sí
+      // permanecen en el total, tal como se presenta en el informe consolidado.
+      const contarCategorias = (
+        encuestas: Encuesta[],
+        key: typeof PREGUNTAS[number]["key"],
+        max: number,
+      ) => {
+        let satisfechos = 0
+        let insatisfechos = 0
+        let sinResponder = 0
+        encuestas.forEach((e) => {
+          const v = Number(e[key])
+          if (!v || v < 1) {
+            sinResponder++
+            return
+          }
+          if (v >= max - 1) satisfechos++
+          else insatisfechos++
+        })
+        return { satisfechos, insatisfechos, sinResponder }
+      }
+      const pctSatisfaccion = (encuestas: Encuesta[], key: typeof PREGUNTAS[number]["key"], max: number) => {
+        const total = encuestas.length
+        if (total === 0) return 0
+        return parseFloat(((contarCategorias(encuestas, key, max).satisfechos / total) * 100).toFixed(2))
+      }
+      const pctInsatisfaccion = (encuestas: Encuesta[], key: typeof PREGUNTAS[number]["key"], max: number) => {
+        const total = encuestas.length
+        if (total === 0) return 0
+        return parseFloat(((contarCategorias(encuestas, key, max).insatisfechos / total) * 100).toFixed(2))
+      }
+      const promediar = (valores: number[]) =>
+        valores.length ? parseFloat((valores.reduce((a, b) => a + b, 0) / valores.length).toFixed(2)) : 0
+
+      // Porcentajes generales por pregunta (denominador = total de encuestas del filtro)
+      const resumenSatisf = PREGUNTAS.map(({ key, max }) => pctSatisfaccion(allEncuestas, key, max))
+      const resumenInsatisf = PREGUNTAS.map(({ key, max }) => pctInsatisfaccion(allEncuestas, key, max))
+      const promSatisfGeneral = promediar(resumenSatisf)
+      const promInsatisfGeneral = promediar(resumenInsatisf)
+
       // ---- Hoja 1: Resumen ----
       const resumenData: (string | number)[][] = [
-        ["INFORME DE SATISFACCIÓN"],
+        ["INFORME DE SATISFACCIÓN E INSATISFACCIÓN"],
         ["Generado:", format(new Date(), "dd/MM/yyyy HH:mm", { locale: es })],
         [],
         ["Total de encuestas analizadas", n],
         [],
-        ["PROMEDIOS GENERALES POR PREGUNTA"],
-        ["Pregunta", "Escala", "Promedio", "% Satisfacción"],
-        ...PREGUNTAS.map(({ key, label, max }) => {
+        ["CONSOLIDADO GENERAL POR PREGUNTA"],
+        ["Pregunta", "Escala", "Promedio", "% Satisfacción", "% Insatisfacción"],
+        ...PREGUNTAS.map(({ key, label, max }, i) => {
           const promedio = avg(key)
-          return [label, `1 - ${max}`, parseFloat(promedio.toFixed(2)), parseFloat(((promedio / max) * 100).toFixed(1))]
+          return [label, `1 - ${max}`, parseFloat(promedio.toFixed(2)), resumenSatisf[i], resumenInsatisf[i]]
         }),
+        ["PROMEDIO GENERAL", "", "", promSatisfGeneral, promInsatisfGeneral],
       ]
       const wsResumen = XLSX.utils.aoa_to_sheet(resumenData)
-      wsResumen["!cols"] = [{ wch: 45 }, { wch: 10 }, { wch: 12 }, { wch: 16 }]
+      wsResumen["!cols"] = [{ wch: 45 }, { wch: 10 }, { wch: 12 }, { wch: 16 }, { wch: 16 }]
       XLSX.utils.book_append_sheet(wb, wsResumen, "Resumen")
 
       // ---- Hoja 2: Promedios por Pregunta ----
       const promediosData: (string | number)[][] = [
-        ["Pregunta", "Escala Máx.", "Promedio", "% de Satisfacción"],
+        ["Pregunta", "Escala Máx.", "Promedio", "% de Satisfacción", "% de Insatisfacción"],
         ...PREGUNTAS.map(({ key, label, max }) => {
           const promedio = avg(key)
-          return [label, max, parseFloat(promedio.toFixed(2)), parseFloat(((promedio / max) * 100).toFixed(1))]
+          return [
+            label,
+            max,
+            parseFloat(promedio.toFixed(2)),
+            pctSatisfaccion(allEncuestas, key, max),
+            pctInsatisfaccion(allEncuestas, key, max),
+          ]
         }),
       ]
       const wsPromedios = XLSX.utils.aoa_to_sheet(promediosData)
-      wsPromedios["!cols"] = [{ wch: 45 }, { wch: 14 }, { wch: 12 }, { wch: 18 }]
+      wsPromedios["!cols"] = [{ wch: 45 }, { wch: 14 }, { wch: 12 }, { wch: 18 }, { wch: 18 }]
       XLSX.utils.book_append_sheet(wb, wsPromedios, "Promedios por Pregunta")
 
       // ---- Hoja 3: Distribución de Respuestas ----
@@ -515,7 +564,7 @@ export function AdminDashboard({
         if (!epsMap.has(key)) epsMap.set(key, [])
         epsMap.get(key)!.push(e)
       })
-      const epsHeaders = ["EPS", "Total Encuestas", ...PREGUNTAS.map((p) => p.label), "Promedio General"]
+      const epsHeaders = ["EPS", "Total Encuestas", ...PREGUNTAS.map((p) => p.label), "Promedio General", "% Satisfacción", "% Insatisfacción"]
       const epsRows = Array.from(epsMap.entries())
         .map(([epsNombre, encuestas]) => {
           const promedios = PREGUNTAS.map(({ key }) => {
@@ -523,11 +572,13 @@ export function AdminDashboard({
             return parseFloat((s / encuestas.length).toFixed(2))
           })
           const promGeneral = parseFloat((promedios.reduce((a, b) => a + b, 0) / promedios.length).toFixed(2))
-          return [epsNombre, encuestas.length, ...promedios, promGeneral]
+          const satisfGen = promediar(PREGUNTAS.map(({ key, max }) => pctSatisfaccion(encuestas, key, max)))
+          const insatisfGen = promediar(PREGUNTAS.map(({ key, max }) => pctInsatisfaccion(encuestas, key, max)))
+          return [epsNombre, encuestas.length, ...promedios, promGeneral, satisfGen, insatisfGen]
         })
         .sort((a, b) => (b[1] as number) - (a[1] as number))
       const wsEps = XLSX.utils.aoa_to_sheet([epsHeaders, ...epsRows])
-      wsEps["!cols"] = [{ wch: 30 }, { wch: 16 }, ...PREGUNTAS.map(() => ({ wch: 14 })), { wch: 16 }]
+      wsEps["!cols"] = [{ wch: 30 }, { wch: 16 }, ...PREGUNTAS.map(() => ({ wch: 14 })), { wch: 16 }, { wch: 16 }, { wch: 16 }]
       XLSX.utils.book_append_sheet(wb, wsEps, "Análisis por EPS")
 
       // ---- Hoja 5: Análisis por Sede ----
@@ -543,7 +594,7 @@ export function AdminDashboard({
         }
         sedeMap.get(key)!.encuestas.push(e)
       })
-      const sedeHeaders = ["Sede", "Municipio", "Departamento", "Total Encuestas", ...PREGUNTAS.map((p) => p.label), "Promedio General"]
+      const sedeHeaders = ["Sede", "Municipio", "Departamento", "Total Encuestas", ...PREGUNTAS.map((p) => p.label), "Promedio General", "% Satisfacción", "% Insatisfacción"]
       const sedeRows = Array.from(sedeMap.entries())
         .map(([sedeNombre, { encuestas, municipio, departamento }]) => {
           const promedios = PREGUNTAS.map(({ key }) => {
@@ -551,12 +602,61 @@ export function AdminDashboard({
             return parseFloat((s / encuestas.length).toFixed(2))
           })
           const promGeneral = parseFloat((promedios.reduce((a, b) => a + b, 0) / promedios.length).toFixed(2))
-          return [sedeNombre, municipio, departamento, encuestas.length, ...promedios, promGeneral]
+          const satisfGen = promediar(PREGUNTAS.map(({ key, max }) => pctSatisfaccion(encuestas, key, max)))
+          const insatisfGen = promediar(PREGUNTAS.map(({ key, max }) => pctInsatisfaccion(encuestas, key, max)))
+          return [sedeNombre, municipio, departamento, encuestas.length, ...promedios, promGeneral, satisfGen, insatisfGen]
         })
         .sort((a, b) => (b[3] as number) - (a[3] as number))
       const wsSede = XLSX.utils.aoa_to_sheet([sedeHeaders, ...sedeRows])
-      wsSede["!cols"] = [{ wch: 30 }, { wch: 20 }, { wch: 20 }, { wch: 16 }, ...PREGUNTAS.map(() => ({ wch: 14 })), { wch: 16 }]
+      wsSede["!cols"] = [{ wch: 30 }, { wch: 20 }, { wch: 20 }, { wch: 16 }, ...PREGUNTAS.map(() => ({ wch: 14 })), { wch: 16 }, { wch: 16 }, { wch: 16 }]
       XLSX.utils.book_append_sheet(wb, wsSede, "Análisis por Sede")
+
+      // ---- Hoja: Insatisfacción por Pregunta (metodología del informe oficial) ----
+      // Refleja la Tabla 1 del informe consolidado: conteo por categoría y % Satisfacción / % Insatisfacción.
+      const insatisfPreguntaData: (string | number)[][] = [
+        ["Pregunta", "Escala", "Total", "Insatisfechos", "Satisfechos", "Sin Responder", "% Insatisfacción", "% Satisfacción"],
+        ...PREGUNTAS.map(({ key, label, max }) => {
+          const { satisfechos, insatisfechos, sinResponder } = contarCategorias(allEncuestas, key, max)
+          return [
+            label,
+            `1 - ${max}`,
+            n,
+            insatisfechos,
+            satisfechos,
+            sinResponder,
+            pctInsatisfaccion(allEncuestas, key, max),
+            pctSatisfaccion(allEncuestas, key, max),
+          ]
+        }),
+        ["PROMEDIO GENERAL", "", "", "", "", "", promInsatisfGeneral, promSatisfGeneral],
+      ]
+      const wsInsatisfPregunta = XLSX.utils.aoa_to_sheet(insatisfPreguntaData)
+      wsInsatisfPregunta["!cols"] = [{ wch: 45 }, { wch: 8 }, { wch: 10 }, { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 16 }]
+      XLSX.utils.book_append_sheet(wb, wsInsatisfPregunta, "Insatisfacción por Pregunta")
+
+      // ---- Hoja: Insatisfacción por EPS (% de insatisfacción por pregunta) ----
+      const insatisfEpsHeaders = ["EPS", "Total Encuestas", ...PREGUNTAS.map((p) => p.label), "% Insatisfacción General"]
+      const insatisfEpsRows = Array.from(epsMap.entries())
+        .map(([epsNombre, encuestas]) => {
+          const porcentajes = PREGUNTAS.map(({ key, max }) => pctInsatisfaccion(encuestas, key, max))
+          return [epsNombre, encuestas.length, ...porcentajes, promediar(porcentajes)]
+        })
+        .sort((a, b) => (b[b.length - 1] as number) - (a[b.length - 1] as number))
+      const wsInsatisfEps = XLSX.utils.aoa_to_sheet([insatisfEpsHeaders, ...insatisfEpsRows])
+      wsInsatisfEps["!cols"] = [{ wch: 30 }, { wch: 16 }, ...PREGUNTAS.map(() => ({ wch: 14 })), { wch: 24 }]
+      XLSX.utils.book_append_sheet(wb, wsInsatisfEps, "Insatisfacción por EPS")
+
+      // ---- Hoja: Insatisfacción por Sede (% de insatisfacción por pregunta) ----
+      const insatisfSedeHeaders = ["Sede", "Municipio", "Departamento", "Total Encuestas", ...PREGUNTAS.map((p) => p.label), "% Insatisfacción General"]
+      const insatisfSedeRows = Array.from(sedeMap.entries())
+        .map(([sedeNombre, { encuestas, municipio, departamento }]) => {
+          const porcentajes = PREGUNTAS.map(({ key, max }) => pctInsatisfaccion(encuestas, key, max))
+          return [sedeNombre, municipio, departamento, encuestas.length, ...porcentajes, promediar(porcentajes)]
+        })
+        .sort((a, b) => (b[b.length - 1] as number) - (a[b.length - 1] as number))
+      const wsInsatisfSede = XLSX.utils.aoa_to_sheet([insatisfSedeHeaders, ...insatisfSedeRows])
+      wsInsatisfSede["!cols"] = [{ wch: 30 }, { wch: 20 }, { wch: 20 }, { wch: 16 }, ...PREGUNTAS.map(() => ({ wch: 14 })), { wch: 24 }]
+      XLSX.utils.book_append_sheet(wb, wsInsatisfSede, "Insatisfacción por Sede")
 
       // ---- Hoja 6: Detalle Cualitativo (misma estructura que CSV, valores en texto) ----
       // Escala estándar 1-4: Malo / Regular / Bueno / Excelente
@@ -667,7 +767,7 @@ export function AdminDashboard({
       const url = URL.createObjectURL(blob)
       const a = document.createElement("a")
       a.href = url
-      a.download = `informe_satisfaccion_${format(new Date(), "yyyy-MM-dd")}.xlsx`
+      a.download = `informe_satisfaccion_insatisfaccion_${format(new Date(), "yyyy-MM-dd")}.xlsx`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
@@ -839,7 +939,7 @@ export function AdminDashboard({
                     ) : (
                       <FileSpreadsheet className="mr-2 h-4 w-4" />
                     )}
-                    {isExportingInforme ? "Generando informe..." : "Informe Analítico Excel"}
+                    {isExportingInforme ? "Generando informe..." : "Informe Satisfacción e Insatisfacción"}
                   </Button>
                 </div>
               </div>
