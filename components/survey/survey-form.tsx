@@ -18,6 +18,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Spinner } from "@/components/ui/spinner"
 import { RatingQuestion } from "./rating-question"
 import { SectionHeader } from "./section-header"
+import { TurnstileWidget } from "./turnstile-widget"
 import {
   type Departamento,
   type Municipio,
@@ -74,6 +75,9 @@ export function SurveyForm() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [geoLoading, setGeoLoading] = useState(false)
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+
+  const captchaEnabled = Boolean(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY)
 
   // Cargar datos iniciales y ubicación guardada
   useEffect(() => {
@@ -342,6 +346,13 @@ export function SurveyForm() {
       }
     }
 
+    // Requiere verificación anti-bot cuando Turnstile está configurado
+    if (captchaEnabled && !captchaToken) {
+      setError("Por favor complete la verificación de seguridad antes de enviar.")
+      setSubmitting(false)
+      return
+    }
+
     // Guardar ubicación para próxima encuesta
     const locationToStore: StoredLocation = {
       departamento_id: formData.departamento_id,
@@ -359,19 +370,33 @@ export function SurveyForm() {
       ...formData,
       eps: selectedEps?.nombre || "",
       tipo_afiliado: selectedTipo?.nombre || "",
+      turnstileToken: captchaToken,
     }
 
-    const { error: submitError } = await supabase
-      .from("encuestas")
-      .insert([submitData])
+    // El insert corre en el servidor (/api/encuestas): valida el CAPTCHA y los
+    // datos con la service-role key. El navegador ya no puede insertar directo.
+    try {
+      const res = await fetch("/api/encuestas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(submitData),
+      })
 
-    if (submitError) {
-      console.error("Error submitting survey:", submitError)
-      setError("Error al enviar la encuesta. Por favor intente de nuevo.")
-    } else {
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null
+        setError(data?.error || "Error al enviar la encuesta. Por favor intente de nuevo.")
+        setCaptchaToken(null)
+        setSubmitting(false)
+        return
+      }
+
       router.push("/encuesta/gracias")
+    } catch (err) {
+      console.error("Error submitting survey:", err)
+      setError("Error de conexión. Por favor intente de nuevo.")
+      setCaptchaToken(null)
+      setSubmitting(false)
     }
-    setSubmitting(false)
   }
 
   if (loading) {
@@ -746,6 +771,14 @@ export function SurveyForm() {
         </CardContent>
       </Card>
 
+      {/* Verificación anti-bot (Cloudflare Turnstile) */}
+      <div className="flex justify-center">
+        <TurnstileWidget
+          onVerify={setCaptchaToken}
+          onExpire={() => setCaptchaToken(null)}
+        />
+      </div>
+
       {/* Error message */}
       {error && (
         <div className="rounded-lg bg-destructive/10 p-4 text-center text-sm text-destructive">
@@ -758,7 +791,7 @@ export function SurveyForm() {
         type="submit"
         className="w-full"
         size="lg"
-        disabled={submitting}
+        disabled={submitting || (captchaEnabled && !captchaToken)}
       >
         {submitting ? (
           <>
